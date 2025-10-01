@@ -109,6 +109,16 @@ pub mod UA2Account {
         assert(condition, error);
     }
 
+    fn u256_le(lhs: u256, rhs: u256) -> bool {
+        if lhs.high < rhs.high {
+            true
+        } else if lhs.high > rhs.high {
+            false
+        } else {
+            lhs.low <= rhs.low
+        }
+    }
+
     #[external(v0)]
     fn add_session_with_allowlists(
         ref self: ContractState,
@@ -214,13 +224,41 @@ pub mod UA2Account {
             let mut processed_call_count: u32 = 0_u32;
 
             for call_ref in calls.span() {
-                let Call { to, selector, calldata: _ } = *call_ref;
+                let Call { to, selector, calldata } = *call_ref;
 
                 let target_allowed = self.session_target_allow.read((key_hash, to));
                 assert(target_allowed == true, ERR_POLICY_TARGET_DENIED);
 
                 let selector_allowed = self.session_selector_allow.read((key_hash, selector));
                 assert(selector_allowed == true, ERR_POLICY_SELECTOR_DENIED);
+
+                if selector == ERC20_TRANSFER_SEL {
+                    let calldata_len = calldata.len();
+                    require(calldata_len >= 3_usize, ERR_VALUE_LIMIT_EXCEEDED);
+
+                    let amount_low_felt = *calldata.at(1_usize);
+                    let amount_high_felt = *calldata.at(2_usize);
+
+                    let amount_low: u128 = match amount_low_felt.try_into() {
+                        Option::Some(value) => value,
+                        Option::None(_) => {
+                            assert(false, ERR_VALUE_LIMIT_EXCEEDED);
+                            0_u128
+                        },
+                    };
+
+                    let amount_high: u128 = match amount_high_felt.try_into() {
+                        Option::Some(value) => value,
+                        Option::None(_) => {
+                            assert(false, ERR_VALUE_LIMIT_EXCEEDED);
+                            0_u128
+                        },
+                    };
+
+                    let amount = u256 { low: amount_low, high: amount_high };
+
+                    require(u256_le(amount, policy.max_value_per_call), ERR_VALUE_LIMIT_EXCEEDED);
+                }
 
                 processed_call_count += 1_u32;
             }

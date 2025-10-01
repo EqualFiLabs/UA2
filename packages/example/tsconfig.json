@@ -1,0 +1,20 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "types": ["vite/client"],
+    "paths": {
+      "@ua2/core": ["../core/src/index.ts"],
+      "@ua2/react": ["../react/src/index.ts"]
+    }
+  },
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "vite.config.ts",
+    "env.d.ts"
+  ],
+  "exclude": [
+    "dist"
+  ]
+}

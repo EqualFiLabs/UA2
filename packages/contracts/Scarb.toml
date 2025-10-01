@@ -1,0 +1,8 @@
+[package]
+name = "ua2_contracts"
+version = "0.1.0"
+edition = "2023_11"
+
+description = "UA2 smart contract suite"
+
+[dependencies]

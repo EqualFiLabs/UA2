@@ -1,7 +1,1 @@
-#[contract]
-mod dummy {
-    #[view]
-    fn ping() -> felt252 {
-        'u' + 'a' + '2'
-    }
-}
+pub mod ua2_account;

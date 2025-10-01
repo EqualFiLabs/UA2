@@ -7,13 +7,15 @@ pub mod UA2Account {
     use super::{AccountComponent, SRC5Component};
     use core::array::{Array, ArrayTrait, SpanTrait};
     use core::option::Option;
-    use core::traits::TryInto;
+    use core::traits::{Into, TryInto};
     use core::integer::u256;
     use openzeppelin::account::interface;
     use starknet::account::Call;
     use starknet::storage::Map;
+    use starknet::syscalls::call_contract_syscall;
     use starknet::{
         ContractAddress,
+        SyscallResultTrait,
         get_block_timestamp,
         get_caller_address,
         get_contract_address,
@@ -23,11 +25,14 @@ pub mod UA2Account {
     component!(path: SRC5Component, storage: src5, event: SRC5Event);
 
     const ERR_SESSION_EXPIRED: felt252 = 'ERR_SESSION_EXPIRED';
+    const ERR_SESSION_INACTIVE: felt252 = 'ERR_SESSION_INACTIVE';
     const ERR_POLICY_CALLCAP: felt252 = 'ERR_POLICY_CALLCAP';
     const ERR_POLICY_SELECTOR_DENIED: felt252 = 'ERR_POLICY_SELECTOR_DENIED';
     const ERR_POLICY_TARGET_DENIED: felt252 = 'ERR_POLICY_TARGET_DENIED';
     const ERR_VALUE_LIMIT_EXCEEDED: felt252 = 'ERR_VALUE_LIMIT_EXCEEDED';
-    const ERC20_TRANSFER_SEL: felt252 = starknet::selector!("transfer");
+    const ERR_POLICY_CALLCOUNT_MISMATCH: felt252 = 'ERR_POLICY_CALLCOUNT_MISMATCH';
+    const ERC20_TRANSFER_SEL: felt252 = 0x483afd3f4caec50eebf44246fe54e38c95e3179a5ec9ea81740eca5b482d118;
+    const APPLY_SESSION_USAGE_SELECTOR: felt252 = 0x0eecfb44;
 
     #[storage]
     pub struct Storage {
@@ -149,6 +154,31 @@ pub mod UA2Account {
         }
     }
 
+    #[external(v0)]
+    fn apply_session_usage(
+        ref self: ContractState,
+        key_hash: felt252,
+        prior_calls_used: u32,
+        tx_call_count: u32,
+    ) {
+        let mut policy = self.session.read(key_hash);
+
+        require(policy.is_active, ERR_SESSION_INACTIVE);
+
+        let now = get_block_timestamp();
+        require(now <= policy.expires_at, ERR_SESSION_EXPIRED);
+
+        require(policy.calls_used == prior_calls_used, ERR_POLICY_CALLCOUNT_MISMATCH);
+
+        let updated_calls_used = checked_add_u32(policy.calls_used, tx_call_count);
+        require(updated_calls_used <= policy.max_calls, ERR_POLICY_CALLCAP);
+
+        policy.calls_used = updated_calls_used;
+        self.session.write(key_hash, policy);
+
+        self.emit(Event::SessionUsed(SessionUsed { key_hash, used: tx_call_count }));
+    }
+
     #[abi(embed_v0)]
     impl SessionManagerImpl of ISessionManager<ContractState> {
         fn add_session(ref self: ContractState, key: felt252, mut policy: SessionPolicy) {
@@ -186,10 +216,116 @@ pub mod UA2Account {
         }
     }
 
+    #[derive(Copy, Drop)]
+    struct SessionValidation {
+        key_hash: felt252,
+        policy: SessionPolicy,
+        tx_call_count: u32,
+    }
+
+    fn checked_add_u32(lhs: u32, rhs: u32) -> u32 {
+        let sum = lhs + rhs;
+        assert(sum >= lhs, ERR_POLICY_CALLCAP);
+        sum
+    }
+
+    fn validate_session_policy(
+        self: @ContractState,
+        signature: Span<felt252>,
+        calls: @Array<Call>,
+    ) -> SessionValidation {
+        let key_hash = *signature.at(0_usize);
+        let policy = self.session.read(key_hash);
+
+        require(policy.is_active, ERR_SESSION_INACTIVE);
+
+        let now = get_block_timestamp();
+        require(now <= policy.expires_at, ERR_SESSION_EXPIRED);
+
+        let calls_len = ArrayTrait::<Call>::len(calls);
+        let tx_call_count: u32 = match calls_len.try_into() {
+            Option::Some(value) => value,
+            Option::None(_) => {
+                assert(false, ERR_POLICY_CALLCAP);
+                0_u32
+            },
+        };
+
+        let _new_calls_used = checked_add_u32(policy.calls_used, tx_call_count);
+        require(_new_calls_used <= policy.max_calls, ERR_POLICY_CALLCAP);
+
+        for call_ref in calls.span() {
+            let Call { to, selector, calldata } = *call_ref;
+
+            let target_allowed = self.session_target_allow.read((key_hash, to));
+            assert(target_allowed == true, ERR_POLICY_TARGET_DENIED);
+
+            let selector_allowed = self.session_selector_allow.read((key_hash, selector));
+            assert(selector_allowed == true, ERR_POLICY_SELECTOR_DENIED);
+
+            if selector == ERC20_TRANSFER_SEL {
+                let calldata_len = calldata.len();
+                require(calldata_len >= 3_usize, ERR_VALUE_LIMIT_EXCEEDED);
+
+                let amount_low_felt = *calldata.at(1_usize);
+                let amount_high_felt = *calldata.at(2_usize);
+
+                let amount_low: u128 = match amount_low_felt.try_into() {
+                    Option::Some(value) => value,
+                    Option::None(_) => {
+                        assert(false, ERR_VALUE_LIMIT_EXCEEDED);
+                        0_u128
+                    },
+                };
+
+                let amount_high: u128 = match amount_high_felt.try_into() {
+                    Option::Some(value) => value,
+                    Option::None(_) => {
+                        assert(false, ERR_VALUE_LIMIT_EXCEEDED);
+                        0_u128
+                    },
+                };
+
+                let amount = u256 { low: amount_low, high: amount_high };
+
+                require(u256_le(amount, policy.max_value_per_call), ERR_VALUE_LIMIT_EXCEEDED);
+            }
+        }
+
+        SessionValidation { key_hash, policy, tx_call_count }
+    }
+
     #[abi(embed_v0)]
     impl AccountMixinImpl of interface::AccountABI<ContractState> {
         fn __execute__(self: @ContractState, calls: Array<Call>) {
+            let tx_info = starknet::get_tx_info().unbox();
+            let tx_hash = tx_info.transaction_hash;
+            let signature = tx_info.signature;
+
+            let owner_valid = AccountComponent::InternalImpl::<ContractState>::_is_valid_signature(
+                self.account, tx_hash, signature
+            );
+
+            if owner_valid {
+                AccountComponent::AccountMixinImpl::<ContractState>::__execute__(self, calls);
+                return;
+            }
+
+            let validation = validate_session_policy(self, signature, @calls);
+
             AccountComponent::AccountMixinImpl::<ContractState>::__execute__(self, calls);
+
+            let mut accounting_calldata = ArrayTrait::<felt252>::new();
+            accounting_calldata.append(validation.key_hash);
+            accounting_calldata.append(validation.policy.calls_used.into());
+            accounting_calldata.append(validation.tx_call_count.into());
+
+            let _ = call_contract_syscall(
+                get_contract_address(),
+                APPLY_SESSION_USAGE_SELECTOR,
+                accounting_calldata.span(),
+            )
+            .unwrap_syscall();
         }
 
         fn __validate__(self: @ContractState, calls: Array<Call>) -> felt252 {
@@ -205,66 +341,7 @@ pub mod UA2Account {
                 return AccountComponent::AccountMixinImpl::<ContractState>::__validate__(self, calls);
             }
 
-            let key_hash = *signature.at(0_usize);
-            let mut policy = self.session.read(key_hash);
-
-            let now = get_block_timestamp();
-            require(now <= policy.expires_at, ERR_SESSION_EXPIRED);
-
-            let calls_len = ArrayTrait::<Call>::len(@calls);
-            let tx_call_count: u32 = match calls_len.try_into() {
-                Option::Some(value) => value,
-                Option::None(_) => {
-                    assert(false, ERR_POLICY_CALLCAP);
-                    0_u32
-                },
-            };
-            require(policy.calls_used + tx_call_count <= policy.max_calls, ERR_POLICY_CALLCAP);
-
-            let mut processed_call_count: u32 = 0_u32;
-
-            for call_ref in calls.span() {
-                let Call { to, selector, calldata } = *call_ref;
-
-                let target_allowed = self.session_target_allow.read((key_hash, to));
-                assert(target_allowed == true, ERR_POLICY_TARGET_DENIED);
-
-                let selector_allowed = self.session_selector_allow.read((key_hash, selector));
-                assert(selector_allowed == true, ERR_POLICY_SELECTOR_DENIED);
-
-                if selector == ERC20_TRANSFER_SEL {
-                    let calldata_len = calldata.len();
-                    require(calldata_len >= 3_usize, ERR_VALUE_LIMIT_EXCEEDED);
-
-                    let amount_low_felt = *calldata.at(1_usize);
-                    let amount_high_felt = *calldata.at(2_usize);
-
-                    let amount_low: u128 = match amount_low_felt.try_into() {
-                        Option::Some(value) => value,
-                        Option::None(_) => {
-                            assert(false, ERR_VALUE_LIMIT_EXCEEDED);
-                            0_u128
-                        },
-                    };
-
-                    let amount_high: u128 = match amount_high_felt.try_into() {
-                        Option::Some(value) => value,
-                        Option::None(_) => {
-                            assert(false, ERR_VALUE_LIMIT_EXCEEDED);
-                            0_u128
-                        },
-                    };
-
-                    let amount = u256 { low: amount_low, high: amount_high };
-
-                    require(u256_le(amount, policy.max_value_per_call), ERR_VALUE_LIMIT_EXCEEDED);
-                }
-
-                processed_call_count += 1_u32;
-            }
-
-            let _ = policy;
-            let _ = processed_call_count;
+            let _validation = validate_session_policy(self, signature, @calls);
 
             starknet::VALIDATED
         }

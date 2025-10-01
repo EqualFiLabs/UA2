@@ -6,11 +6,18 @@ use openzeppelin::introspection::src5::SRC5Component;
 pub mod UA2Account {
     use super::{AccountComponent, SRC5Component};
     use core::array::{Array, ArrayTrait, SpanTrait};
+    use core::option::Option;
+    use core::traits::TryInto;
     use core::integer::u256;
     use openzeppelin::account::interface;
     use starknet::account::Call;
     use starknet::storage::Map;
-    use starknet::{ContractAddress, get_caller_address, get_contract_address};
+    use starknet::{
+        ContractAddress,
+        get_block_timestamp,
+        get_caller_address,
+        get_contract_address,
+    };
 
     component!(path: AccountComponent, storage: account, event: AccountEvent);
     component!(path: SRC5Component, storage: src5, event: SRC5Event);
@@ -96,6 +103,10 @@ pub mod UA2Account {
         let caller: ContractAddress = get_caller_address();
         let contract_address: ContractAddress = get_contract_address();
         assert(caller == contract_address, 'NOT_OWNER');
+    }
+
+    fn require(condition: bool, error: felt252) {
+        assert(condition, error);
     }
 
     #[external(v0)]
@@ -187,7 +198,20 @@ pub mod UA2Account {
             let key_hash = *signature.at(0_usize);
             let mut policy = self.session.read(key_hash);
 
-            let mut tx_call_count: u32 = 0_u32;
+            let now = get_block_timestamp();
+            require(now <= policy.expires_at, ERR_SESSION_EXPIRED);
+
+            let calls_len = ArrayTrait::<Call>::len(@calls);
+            let tx_call_count: u32 = match calls_len.try_into() {
+                Option::Some(value) => value,
+                Option::None(_) => {
+                    assert(false, ERR_POLICY_CALLCAP);
+                    0_u32
+                },
+            };
+            require(policy.calls_used + tx_call_count <= policy.max_calls, ERR_POLICY_CALLCAP);
+
+            let mut processed_call_count: u32 = 0_u32;
 
             for call_ref in calls.span() {
                 let Call { to, selector, calldata: _ } = *call_ref;
@@ -198,11 +222,11 @@ pub mod UA2Account {
                 let selector_allowed = self.session_selector_allow.read((key_hash, selector));
                 assert(selector_allowed == true, ERR_POLICY_SELECTOR_DENIED);
 
-                tx_call_count += 1_u32;
+                processed_call_count += 1_u32;
             }
 
             let _ = policy;
-            let _ = tx_call_count;
+            let _ = processed_call_count;
 
             starknet::VALIDATED
         }

@@ -2,6 +2,7 @@ use openzeppelin::account::AccountComponent;
 use openzeppelin::introspection::src5::SRC5Component;
 
 #[starknet::contract(account)]
+#[feature("deprecated_legacy_map")]
 pub mod UA2Account {
     use super::{AccountComponent, SRC5Component};
     use core::integer::u256;
@@ -10,6 +11,13 @@ pub mod UA2Account {
 
     component!(path: AccountComponent, storage: account, event: AccountEvent);
     component!(path: SRC5Component, storage: src5, event: SRC5Event);
+
+    const ERR_SESSION_EXPIRED: felt252 = 'ERR_SESSION_EXPIRED';
+    const ERR_POLICY_CALLCAP: felt252 = 'ERR_POLICY_CALLCAP';
+    const ERR_POLICY_SELECTOR_DENIED: felt252 = 'ERR_POLICY_SELECTOR_DENIED';
+    const ERR_POLICY_TARGET_DENIED: felt252 = 'ERR_POLICY_TARGET_DENIED';
+    const ERR_VALUE_LIMIT_EXCEEDED: felt252 = 'ERR_VALUE_LIMIT_EXCEEDED';
+    const ERC20_TRANSFER_SEL: felt252 = starknet::selector!("transfer");
 
     #[storage]
     pub struct Storage {
@@ -20,6 +28,8 @@ pub mod UA2Account {
         owner_pubkey: felt252,
         session: Map<felt252, SessionPolicy>,
         session_nonce: Map<felt252, u128>,
+        session_target_allow: LegacyMap<(felt252, ContractAddress), bool>,
+        session_selector_allow: LegacyMap<(felt252, felt252), bool>,
     }
 
     #[derive(Copy, Drop, Serde, starknet::Store)]
@@ -43,6 +53,12 @@ pub mod UA2Account {
         pub key_hash: felt252,
     }
 
+    #[derive(Drop, starknet::Event)]
+    pub struct SessionUsed {
+        pub key_hash: felt252,
+        pub used: u32,
+    }
+
     #[starknet::interface]
     pub trait ISessionManager<TContractState> {
         fn add_session(ref self: TContractState, key: felt252, policy: SessionPolicy);
@@ -59,6 +75,7 @@ pub mod UA2Account {
         SRC5Event: SRC5Component::Event,
         SessionAdded: SessionAdded,
         SessionRevoked: SessionRevoked,
+        SessionUsed: SessionUsed,
     }
 
     #[constructor]

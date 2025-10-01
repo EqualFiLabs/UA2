@@ -5,7 +5,10 @@ use openzeppelin::introspection::src5::SRC5Component;
 #[feature("deprecated_legacy_map")]
 pub mod UA2Account {
     use super::{AccountComponent, SRC5Component};
+    use core::array::{Array, ArrayTrait, SpanTrait};
     use core::integer::u256;
+    use openzeppelin::account::interface;
+    use starknet::account::Call;
     use starknet::storage::Map;
     use starknet::{ContractAddress, get_caller_address, get_contract_address};
 
@@ -95,6 +98,36 @@ pub mod UA2Account {
         assert(caller == contract_address, 'NOT_OWNER');
     }
 
+    #[external(v0)]
+    fn add_session_with_allowlists(
+        ref self: ContractState,
+        key: felt252,
+        mut policy: SessionPolicy,
+        targets: Array<ContractAddress>,
+        selectors: Array<felt252>,
+    ) {
+        assert_owner();
+        self.add_session(key, policy);
+
+        let key_hash = key;
+
+        let mut i = 0_usize;
+        let targets_len = ArrayTrait::<ContractAddress>::len(@targets);
+        while i < targets_len {
+            let target = *ArrayTrait::<ContractAddress>::at(@targets, i);
+            self.session_target_allow.write((key_hash, target), true);
+            i += 1_usize;
+        }
+
+        i = 0_usize;
+        let selectors_len = ArrayTrait::<felt252>::len(@selectors);
+        while i < selectors_len {
+            let selector = *ArrayTrait::<felt252>::at(@selectors, i);
+            self.session_selector_allow.write((key_hash, selector), true);
+            i += 1_usize;
+        }
+    }
+
     #[abi(embed_v0)]
     impl SessionManagerImpl of ISessionManager<ContractState> {
         fn add_session(ref self: ContractState, key: felt252, mut policy: SessionPolicy) {
@@ -133,6 +166,109 @@ pub mod UA2Account {
     }
 
     #[abi(embed_v0)]
-    impl AccountMixinImpl = AccountComponent::AccountMixinImpl<ContractState>;
+    impl AccountMixinImpl of interface::AccountABI<ContractState> {
+        fn __execute__(self: @ContractState, calls: Array<Call>) {
+            AccountComponent::AccountMixinImpl::<ContractState>::__execute__(self, calls);
+        }
+
+        fn __validate__(self: @ContractState, calls: Array<Call>) -> felt252 {
+            let tx_info = starknet::get_tx_info().unbox();
+            let tx_hash = tx_info.transaction_hash;
+            let signature = tx_info.signature;
+
+            let owner_valid = AccountComponent::InternalImpl::<ContractState>::_is_valid_signature(
+                self.account, tx_hash, signature
+            );
+
+            if owner_valid {
+                return AccountComponent::AccountMixinImpl::<ContractState>::__validate__(self, calls);
+            }
+
+            let key_hash = *signature.at(0_usize);
+            let mut policy = self.session.read(key_hash);
+
+            let mut tx_call_count: u32 = 0_u32;
+
+            for call_ref in calls.span() {
+                let Call { to, selector, calldata: _ } = *call_ref;
+
+                let target_allowed = self.session_target_allow.read((key_hash, to));
+                assert(target_allowed == true, ERR_POLICY_TARGET_DENIED);
+
+                let selector_allowed = self.session_selector_allow.read((key_hash, selector));
+                assert(selector_allowed == true, ERR_POLICY_SELECTOR_DENIED);
+
+                tx_call_count += 1_u32;
+            }
+
+            let _ = policy;
+            let _ = tx_call_count;
+
+            starknet::VALIDATED
+        }
+
+        fn is_valid_signature(
+            self: @ContractState, hash: felt252, signature: Array<felt252>,
+        ) -> felt252 {
+            AccountComponent::AccountMixinImpl::<ContractState>::is_valid_signature(
+                self, hash, signature
+            )
+        }
+
+        fn supports_interface(self: @ContractState, interface_id: felt252) -> bool {
+            AccountComponent::AccountMixinImpl::<ContractState>::supports_interface(
+                self, interface_id
+            )
+        }
+
+        fn __validate_declare__(self: @ContractState, class_hash: felt252) -> felt252 {
+            AccountComponent::AccountMixinImpl::<ContractState>::__validate_declare__(
+                self, class_hash
+            )
+        }
+
+        fn __validate_deploy__(
+            self: @ContractState,
+            class_hash: felt252,
+            contract_address_salt: felt252,
+            public_key: felt252,
+        ) -> felt252 {
+            AccountComponent::AccountMixinImpl::<ContractState>::__validate_deploy__(
+                self, class_hash, contract_address_salt, public_key
+            )
+        }
+
+        fn get_public_key(self: @ContractState) -> felt252 {
+            AccountComponent::AccountMixinImpl::<ContractState>::get_public_key(self)
+        }
+
+        fn set_public_key(
+            ref self: ContractState, new_public_key: felt252, signature: Span<felt252>,
+        ) {
+            AccountComponent::AccountMixinImpl::<ContractState>::set_public_key(
+                ref self, new_public_key, signature
+            );
+        }
+
+        fn isValidSignature(
+            self: @ContractState, hash: felt252, signature: Array<felt252>,
+        ) -> felt252 {
+            AccountComponent::AccountMixinImpl::<ContractState>::isValidSignature(
+                self, hash, signature
+            )
+        }
+
+        fn getPublicKey(self: @ContractState) -> felt252 {
+            AccountComponent::AccountMixinImpl::<ContractState>::getPublicKey(self)
+        }
+
+        fn setPublicKey(
+            ref self: ContractState, newPublicKey: felt252, signature: Span<felt252>,
+        ) {
+            AccountComponent::AccountMixinImpl::<ContractState>::setPublicKey(
+                ref self, newPublicKey, signature
+            );
+        }
+    }
     impl AccountInternalImpl = AccountComponent::InternalImpl<ContractState>;
 }

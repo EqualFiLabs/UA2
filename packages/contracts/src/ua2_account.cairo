@@ -32,7 +32,7 @@ pub mod UA2Account {
     const ERR_VALUE_LIMIT_EXCEEDED: felt252 = 'ERR_VALUE_LIMIT_EXCEEDED';
     const ERR_POLICY_CALLCOUNT_MISMATCH: felt252 = 'ERR_POLICY_CALLCOUNT_MISMATCH';
     const ERC20_TRANSFER_SEL: felt252 = 0x483afd3f4caec50eebf44246fe54e38c95e3179a5ec9ea81740eca5b482d118;
-    const APPLY_SESSION_USAGE_SELECTOR: felt252 = 0x0eecfb44;
+    const APPLY_SESSION_USAGE_SELECTOR: felt252 = starknet::selector!("apply_session_usage");
 
     #[storage]
     pub struct Storage {

@@ -31,7 +31,7 @@ pub mod UA2Account {
     const ERR_POLICY_TARGET_DENIED: felt252 = 'ERR_POLICY_TARGET_DENIED';
     const ERR_VALUE_LIMIT_EXCEEDED: felt252 = 'ERR_VALUE_LIMIT_EXCEEDED';
     const ERR_POLICY_CALLCOUNT_MISMATCH: felt252 = 'ERR_POLICY_CALLCOUNT_MISMATCH';
-    const ERC20_TRANSFER_SEL: felt252 = 0x483afd3f4caec50eebf44246fe54e38c95e3179a5ec9ea81740eca5b482d118;
+    const ERC20_TRANSFER_SEL: felt252 = 0x83afd3f4caedc6eebf44246fe54e38c95e3179a5ec9ea81740eca5b482d12e;
     const APPLY_SESSION_USAGE_SELECTOR: felt252 = starknet::selector!("apply_session_usage");
 
     #[storage]
@@ -287,8 +287,13 @@ pub mod UA2Account {
                 };
 
                 let amount = u256 { low: amount_low, high: amount_high };
+                let limit = policy.max_value_per_call;
 
-                require(u256_le(amount, policy.max_value_per_call), ERR_VALUE_LIMIT_EXCEEDED);
+                if amount.high > limit.high {
+                    assert(false, ERR_VALUE_LIMIT_EXCEEDED);
+                } else if amount.high == limit.high {
+                    assert(amount.low <= limit.low, ERR_VALUE_LIMIT_EXCEEDED);
+                }
             }
         }
 

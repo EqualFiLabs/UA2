@@ -89,7 +89,7 @@ fn recovery_edge_cases() {
     .unwrap_syscall();
 
     let mut delay_calldata = array![];
-    delay_calldata.append(10_u64.into());
+    delay_calldata.append(1_u64.into());
     call_contract_syscall(
         contract_address,
         starknet::selector!("set_recovery_delay"),
@@ -130,17 +130,6 @@ fn recovery_edge_cases() {
     assert_reverted_with(second_propose, ERR_RECOVERY_IN_PROGRESS);
     stop_cheat_caller_address(contract_address);
 
-    start_cheat_caller_address(contract_address, g3);
-    let mut mismatch_calldata = array![];
-    mismatch_calldata.append(RECOVERY_OWNER_B);
-    let mismatch_confirm = call_contract_syscall(
-        contract_address,
-        starknet::selector!("confirm_recovery"),
-        mismatch_calldata.span(),
-    );
-    assert_reverted_with(mismatch_confirm, ERR_RECOVERY_MISMATCH);
-    stop_cheat_caller_address(contract_address);
-
     start_cheat_caller_address(contract_address, g2);
     let mut confirm_calldata = array![];
     confirm_calldata.append(RECOVERY_OWNER_A);
@@ -158,6 +147,26 @@ fn recovery_edge_cases() {
         duplicate_confirm_calldata.span(),
     );
     assert_reverted_with(duplicate_confirm, ERR_ALREADY_CONFIRMED);
+    stop_cheat_caller_address(contract_address);
+
+    start_cheat_caller_address(contract_address, g3);
+    let mut mismatch_calldata = array![];
+    mismatch_calldata.append(RECOVERY_OWNER_B);
+    let mismatch_confirm = call_contract_syscall(
+        contract_address,
+        starknet::selector!("confirm_recovery"),
+        mismatch_calldata.span(),
+    );
+    assert_reverted_with(mismatch_confirm, ERR_RECOVERY_MISMATCH);
+
+    let mut confirm_calldata = array![];
+    confirm_calldata.append(RECOVERY_OWNER_A);
+    call_contract_syscall(
+        contract_address,
+        starknet::selector!("confirm_recovery"),
+        confirm_calldata.span(),
+    )
+    .unwrap_syscall();
     stop_cheat_caller_address(contract_address);
 
     start_cheat_caller_address(contract_address, g1);

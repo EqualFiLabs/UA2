@@ -38,6 +38,15 @@ pub mod UA2Account {
     const ERR_POLICY_CALLCOUNT_MISMATCH: felt252 = 'ERR_POLICY_CALLCOUNT_MISMATCH';
     const ERR_BAD_SESSION_NONCE: felt252 = 'ERR_BAD_SESSION_NONCE';
     const ERR_SESSION_SIG_INVALID: felt252 = 'ERR_SESSION_SIG_INVALID';
+    const ERR_GUARDIAN_EXISTS: felt252 = 'ERR_GUARDIAN_EXISTS';
+    const ERR_NOT_GUARDIAN: felt252 = 'ERR_NOT_GUARDIAN';
+    const ERR_BAD_THRESHOLD: felt252 = 'ERR_BAD_THRESHOLD';
+    const ERR_RECOVERY_IN_PROGRESS: felt252 = 'ERR_RECOVERY_IN_PROGRESS';
+    const ERR_NO_RECOVERY: felt252 = 'ERR_NO_RECOVERY';
+    const ERR_RECOVERY_MISMATCH: felt252 = 'ERR_RECOVERY_MISMATCH';
+    const ERR_ALREADY_CONFIRMED: felt252 = 'ERR_ALREADY_CONFIRMED';
+    const ERR_BEFORE_ETA: felt252 = 'ERR_BEFORE_ETA';
+    const ERR_NOT_ENOUGH_CONFIRMS: felt252 = 'ERR_NOT_ENOUGH_CONFIRMS';
     const ERC20_TRANSFER_SEL: felt252 = 0x83afd3f4caedc6eebf44246fe54e38c95e3179a5ec9ea81740eca5b482d12e;
     const APPLY_SESSION_USAGE_SELECTOR: felt252 = starknet::selector!("apply_session_usage");
 
@@ -52,6 +61,15 @@ pub mod UA2Account {
         session_nonce: Map<felt252, u128>,
         session_target_allow: LegacyMap<(felt252, ContractAddress), bool>,
         session_selector_allow: LegacyMap<(felt252, felt252), bool>,
+        guardians: LegacyMap<ContractAddress, bool>,
+        guardian_count: u32,
+        guardian_threshold: u8,
+        recovery_delay: u64,
+        recovery_active: bool,
+        recovery_proposed_owner: felt252,
+        recovery_eta: u64,
+        recovery_confirms: LegacyMap<ContractAddress, bool>,
+        recovery_confirm_count: u32,
     }
 
     #[derive(Copy, Drop, Serde, starknet::Store)]
@@ -87,6 +105,46 @@ pub mod UA2Account {
         pub new_nonce: u128,
     }
 
+    #[derive(Drop, starknet::Event)]
+    pub struct GuardianAdded {
+        pub guardian: ContractAddress,
+    }
+
+    #[derive(Drop, starknet::Event)]
+    pub struct GuardianRemoved {
+        pub guardian: ContractAddress,
+    }
+
+    #[derive(Drop, starknet::Event)]
+    pub struct ThresholdSet {
+        pub threshold: u8,
+    }
+
+    #[derive(Drop, starknet::Event)]
+    pub struct RecoveryDelaySet {
+        pub delay: u64,
+    }
+
+    #[derive(Drop, starknet::Event)]
+    pub struct RecoveryProposed {
+        pub proposed_owner: felt252,
+        pub eta: u64,
+    }
+
+    #[derive(Drop, starknet::Event)]
+    pub struct RecoveryConfirmed {
+        pub guardian: ContractAddress,
+        pub confirm_count: u32,
+    }
+
+    #[derive(Drop, starknet::Event)]
+    pub struct RecoveryCanceled {}
+
+    #[derive(Drop, starknet::Event)]
+    pub struct RecoveryExecuted {
+        pub new_owner: felt252,
+    }
+
     #[starknet::interface]
     pub trait ISessionManager<TContractState> {
         fn add_session(ref self: TContractState, key: felt252, policy: SessionPolicy);
@@ -105,6 +163,14 @@ pub mod UA2Account {
         SessionRevoked: SessionRevoked,
         SessionUsed: SessionUsed,
         SessionNonceAdvanced: SessionNonceAdvanced,
+        GuardianAdded: GuardianAdded,
+        GuardianRemoved: GuardianRemoved,
+        ThresholdSet: ThresholdSet,
+        RecoveryDelaySet: RecoveryDelaySet,
+        RecoveryProposed: RecoveryProposed,
+        RecoveryConfirmed: RecoveryConfirmed,
+        RecoveryCanceled: RecoveryCanceled,
+        RecoveryExecuted: RecoveryExecuted,
     }
 
     #[constructor]

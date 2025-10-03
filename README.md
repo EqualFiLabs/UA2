@@ -46,6 +46,11 @@ cd packages/contracts
 scarb build
 ```
 
+> [!TIP]
+> The repo pins `scarb 2.12.0` via `.tool-versions` and expects it to be provided by
+> [mise](https://mise.jdx.dev/). If `scarb` is not on your `PATH`, install the pinned version with
+> `mise install scarb@2.12.0` (or ensure `/root/.asdf/shims` is exported when using `asdf`).
+
 ### 3. Deploy to Sepolia
 
 ```bash

@@ -5,8 +5,8 @@ use snforge_std::{
     declare,
     spy_events,
     start_cheat_block_timestamp,
-    stop_cheat_block_timestamp,
     start_cheat_caller_address,
+    stop_cheat_block_timestamp,
     stop_cheat_caller_address,
     ContractClassTrait,
     DeclareResultTrait,
@@ -17,6 +17,7 @@ use starknet::syscalls::call_contract_syscall;
 use ua2_contracts::ua2_account::UA2Account::{
     Event,
     GuardianAdded,
+    OwnerRotated,
     RecoveryConfirmed,
     RecoveryDelaySet,
     RecoveryExecuted,
@@ -33,6 +34,26 @@ fn deploy_account() -> ContractAddress {
     let contract_class = declare_result.contract_class();
     let (contract_address, _) = contract_class.deploy(@array![OWNER_PUBKEY]).unwrap_syscall();
     contract_address
+}
+
+fn call_with_address(
+    contract_address: ContractAddress,
+    selector: felt252,
+    addr: ContractAddress,
+) -> SyscallResult<Span<felt252>> {
+    let mut calldata = array![];
+    calldata.append(addr.into());
+    call_contract_syscall(contract_address, selector, calldata.span())
+}
+
+fn call_with_felt(
+    contract_address: ContractAddress,
+    selector: felt252,
+    value: felt252,
+) -> SyscallResult<Span<felt252>> {
+    let mut calldata = array![];
+    calldata.append(value);
+    call_contract_syscall(contract_address, selector, calldata.span())
 }
 
 fn assert_reverted_with(result: SyscallResult<Span<felt252>>, expected: felt252) {
@@ -59,84 +80,32 @@ fn recovery_happy_path() {
     let mut spy = spy_events();
 
     start_cheat_caller_address(contract_address, contract_address);
-    let mut add_calldata = array![];
-    add_calldata.append(g1.into());
-    call_contract_syscall(
-        contract_address,
-        starknet::selector!("add_guardian"),
-        add_calldata.span(),
-    )
-    .unwrap_syscall();
+    call_with_address(contract_address, starknet::selector!("add_guardian"), g1).unwrap_syscall();
+    call_with_address(contract_address, starknet::selector!("add_guardian"), g2).unwrap_syscall();
+    call_with_address(contract_address, starknet::selector!("add_guardian"), g3).unwrap_syscall();
 
-    let mut add_calldata = array![];
-    add_calldata.append(g2.into());
-    call_contract_syscall(
-        contract_address,
-        starknet::selector!("add_guardian"),
-        add_calldata.span(),
-    )
-    .unwrap_syscall();
-
-    let mut add_calldata = array![];
-    add_calldata.append(g3.into());
-    call_contract_syscall(
-        contract_address,
-        starknet::selector!("add_guardian"),
-        add_calldata.span(),
-    )
-    .unwrap_syscall();
-
-    let mut threshold_calldata = array![];
-    threshold_calldata.append(2.into());
-    call_contract_syscall(
-        contract_address,
-        starknet::selector!("set_guardian_threshold"),
-        threshold_calldata.span(),
-    )
-    .unwrap_syscall();
-
-    let mut delay_calldata = array![];
-    delay_calldata.append(0_u64.into());
-    call_contract_syscall(
-        contract_address,
-        starknet::selector!("set_recovery_delay"),
-        delay_calldata.span(),
-    )
-    .unwrap_syscall();
+    call_with_felt(contract_address, starknet::selector!("set_guardian_threshold"), 2.into())
+        .unwrap_syscall();
+    call_with_felt(contract_address, starknet::selector!("set_recovery_delay"), 0_u64.into())
+        .unwrap_syscall();
     stop_cheat_caller_address(contract_address);
 
     start_cheat_block_timestamp(contract_address, 100_u64);
 
     start_cheat_caller_address(contract_address, g1);
-    let mut propose_calldata = array![];
-    propose_calldata.append(NEW_OWNER);
-    call_contract_syscall(
-        contract_address,
-        starknet::selector!("propose_recovery"),
-        propose_calldata.span(),
-    )
-    .unwrap_syscall();
+    call_with_felt(contract_address, starknet::selector!("propose_recovery"), NEW_OWNER)
+        .unwrap_syscall();
     stop_cheat_caller_address(contract_address);
 
     start_cheat_caller_address(contract_address, g2);
-    let mut confirm_calldata = array![];
-    confirm_calldata.append(NEW_OWNER);
-    call_contract_syscall(
-        contract_address,
-        starknet::selector!("confirm_recovery"),
-        confirm_calldata.span(),
-    )
-    .unwrap_syscall();
+    call_with_felt(contract_address, starknet::selector!("confirm_recovery"), NEW_OWNER)
+        .unwrap_syscall();
     stop_cheat_caller_address(contract_address);
 
     start_cheat_caller_address(contract_address, g1);
-    let execute_calldata = array![];
-    call_contract_syscall(
-        contract_address,
-        starknet::selector!("execute_recovery"),
-        execute_calldata.span(),
-    )
-    .unwrap_syscall();
+    let empty = array![];
+    call_contract_syscall(contract_address, starknet::selector!("execute_recovery"), empty.span())
+        .unwrap_syscall();
     stop_cheat_caller_address(contract_address);
 
     let empty_owner = array![];
@@ -184,19 +153,38 @@ fn recovery_happy_path() {
         ),
         (
             contract_address,
-            Event::RecoveryConfirmed(RecoveryConfirmed { guardian: g1, new_owner: NEW_OWNER, count: 1_u32 }),
+            Event::RecoveryConfirmed(RecoveryConfirmed {
+                guardian: g1,
+                new_owner: NEW_OWNER,
+                count: 1_u32,
+            }),
         ),
         (
             contract_address,
-            Event::RecoveryProposed(RecoveryProposed { new_owner: NEW_OWNER, eta: 100_u64 }),
+            Event::RecoveryProposed(RecoveryProposed {
+                new_owner: NEW_OWNER,
+                eta: 100_u64,
+            }),
         ),
         (
             contract_address,
-            Event::RecoveryConfirmed(RecoveryConfirmed { guardian: g2, new_owner: NEW_OWNER, count: 2_u32 }),
+            Event::RecoveryConfirmed(RecoveryConfirmed {
+                guardian: g2,
+                new_owner: NEW_OWNER,
+                count: 2_u32,
+            }),
         ),
         (
             contract_address,
-            Event::RecoveryExecuted(RecoveryExecuted { new_owner: NEW_OWNER }),
+            Event::OwnerRotated(OwnerRotated {
+                new_owner: NEW_OWNER,
+            }),
+        ),
+        (
+            contract_address,
+            Event::RecoveryExecuted(RecoveryExecuted {
+                new_owner: NEW_OWNER,
+            }),
         ),
     ]);
 }

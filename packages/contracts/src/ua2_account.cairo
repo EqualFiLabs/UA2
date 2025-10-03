@@ -184,6 +184,42 @@ pub mod UA2Account {
         self.owner_pubkey.read()
     }
 
+    #[external(v0)]
+    fn add_guardian(ref self: ContractState, guardian: ContractAddress) {
+        assert_owner();
+
+        let is_guardian = self.guardians.read(guardian);
+        require(is_guardian == false, ERR_GUARDIAN_EXISTS);
+
+        self.guardians.write(guardian, true);
+
+        let count = self.guardian_count.read();
+        let new_count = count + 1_u32;
+        self.guardian_count.write(new_count);
+
+        self.emit(Event::GuardianAdded(GuardianAdded { guardian }));
+    }
+
+    #[external(v0)]
+    fn remove_guardian(ref self: ContractState, guardian: ContractAddress) {
+        assert_owner();
+
+        let is_guardian = self.guardians.read(guardian);
+        require(is_guardian == true, ERR_NOT_GUARDIAN);
+
+        self.guardians.write(guardian, false);
+
+        let count = self.guardian_count.read();
+        let new_count = count - 1_u32;
+        self.guardian_count.write(new_count);
+
+        let threshold: u8 = self.guardian_threshold.read();
+        let threshold_u32: u32 = threshold.into();
+        require(threshold_u32 <= new_count, ERR_BAD_THRESHOLD);
+
+        self.emit(Event::GuardianRemoved(GuardianRemoved { guardian }));
+    }
+
     fn assert_owner() {
         let caller: ContractAddress = get_caller_address();
         let contract_address: ContractAddress = get_contract_address();

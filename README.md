@@ -85,6 +85,12 @@ For full walkthrough: [`docs/runbook-sepolia.md`](./docs/runbook-sepolia.md)
   cd packages/contracts
   snforge test -vv
   ```
+
+  > [!NOTE]
+  > The setup script installs `snforge` via the `asdf` `starknet-foundry` plugin.
+  > Export the `asdf` shims directory (e.g. `~/.asdf/shims`) to your `PATH`, or call
+  > the binary directly from the install root (e.g. `~/.asdf/installs/starknet-foundry/0.48.1/bin/snforge`)
+  > if the command is not found.
 * **TS/SDK tests:**
 
   ```bash

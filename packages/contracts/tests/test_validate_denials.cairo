@@ -20,8 +20,9 @@ use starknet::syscalls::call_contract_syscall;
 use starknet::{ContractAddress, SyscallResult, SyscallResultTrait};
 use ua2_contracts::ua2_account::UA2Account::SessionPolicy;
 
+use crate::session_test_utils::{build_session_signature, session_key};
+
 const OWNER_PUBKEY: felt252 = 0x12345;
-const SESSION_KEY: felt252 = 0xCAFEBABE;
 const TRANSFER_SELECTOR: felt252 = starknet::selector!("transfer");
 const ERR_POLICY_SELECTOR_DENIED: felt252 = 'ERR_POLICY_SELECTOR_DENIED';
 const ERR_POLICY_TARGET_DENIED: felt252 = 'ERR_POLICY_TARGET_DENIED';
@@ -104,10 +105,14 @@ fn build_transfer_call(
 fn execute_session_calls(
     account_address: ContractAddress,
     calls: @Array<Call>,
+    nonce: u128,
+    session_pubkey: felt252,
 ) -> SyscallResult<Span<felt252>> {
     let zero_contract: ContractAddress = 0.try_into().unwrap();
     start_cheat_caller_address(account_address, zero_contract);
-    start_cheat_signature(account_address, array![SESSION_KEY].span());
+    let signature: Array<felt252> =
+        build_session_signature(account_address, session_pubkey, nonce, calls);
+    start_cheat_signature(account_address, signature.span());
 
     let mut execute_calldata = array![];
     Serde::<Array<Call>>::serialize(calls, ref execute_calldata);
@@ -153,7 +158,8 @@ fn denies_selector_not_allowed() {
     let mut targets = array![mock_address];
     let selectors = array![];
 
-    add_session_with_lists(account_address, SESSION_KEY, policy, @targets, @selectors);
+    let session_pubkey = session_key();
+    add_session_with_lists(account_address, session_pubkey, policy, @targets, @selectors);
 
     start_cheat_block_timestamp(account_address, 5_000_u64);
 
@@ -162,7 +168,7 @@ fn denies_selector_not_allowed() {
     let call = build_transfer_call(mock_address, to, amount);
     let calls = array![call];
 
-    let result = execute_session_calls(account_address, @calls);
+    let result = execute_session_calls(account_address, @calls, 0_u128, session_pubkey);
 
     assert_reverted_with(result, ERR_POLICY_SELECTOR_DENIED);
 
@@ -184,7 +190,8 @@ fn denies_target_not_allowed() {
     let targets = array![];
     let selectors = array![TRANSFER_SELECTOR];
 
-    add_session_with_lists(account_address, SESSION_KEY, policy, @targets, @selectors);
+    let session_pubkey = session_key();
+    add_session_with_lists(account_address, session_pubkey, policy, @targets, @selectors);
 
     start_cheat_block_timestamp(account_address, 5_000_u64);
 
@@ -193,7 +200,7 @@ fn denies_target_not_allowed() {
     let call = build_transfer_call(mock_address, to, amount);
     let calls = array![call];
 
-    let result = execute_session_calls(account_address, @calls);
+    let result = execute_session_calls(account_address, @calls, 0_u128, session_pubkey);
 
     assert_reverted_with(result, ERR_POLICY_TARGET_DENIED);
 
@@ -215,7 +222,8 @@ fn denies_expired_session() {
     let mut targets = array![mock_address];
     let mut selectors = array![TRANSFER_SELECTOR];
 
-    add_session_with_lists(account_address, SESSION_KEY, policy, @targets, @selectors);
+    let session_pubkey = session_key();
+    add_session_with_lists(account_address, session_pubkey, policy, @targets, @selectors);
 
     start_cheat_block_timestamp(account_address, 7_000_u64);
 
@@ -224,7 +232,7 @@ fn denies_expired_session() {
     let call = build_transfer_call(mock_address, to, amount);
     let calls = array![call];
 
-    let result = execute_session_calls(account_address, @calls);
+    let result = execute_session_calls(account_address, @calls, 0_u128, session_pubkey);
 
     assert_reverted_with(result, ERR_SESSION_EXPIRED);
 
@@ -246,7 +254,8 @@ fn denies_over_call_cap() {
     let mut targets = array![mock_address];
     let mut selectors = array![TRANSFER_SELECTOR];
 
-    add_session_with_lists(account_address, SESSION_KEY, policy, @targets, @selectors);
+    let session_pubkey = session_key();
+    add_session_with_lists(account_address, session_pubkey, policy, @targets, @selectors);
 
     start_cheat_block_timestamp(account_address, 5_000_u64);
 
@@ -256,7 +265,7 @@ fn denies_over_call_cap() {
     let call_two = build_transfer_call(mock_address, to, amount);
     let calls = array![call_one, call_two];
 
-    let result = execute_session_calls(account_address, @calls);
+    let result = execute_session_calls(account_address, @calls, 0_u128, session_pubkey);
 
     assert_reverted_with(result, ERR_POLICY_CALLCAP);
 
@@ -278,7 +287,8 @@ fn denies_over_value_cap() {
     let mut targets = array![mock_address];
     let mut selectors = array![TRANSFER_SELECTOR];
 
-    add_session_with_lists(account_address, SESSION_KEY, policy, @targets, @selectors);
+    let session_pubkey = session_key();
+    add_session_with_lists(account_address, session_pubkey, policy, @targets, @selectors);
 
     start_cheat_block_timestamp(account_address, 5_000_u64);
 
@@ -287,7 +297,7 @@ fn denies_over_value_cap() {
     let call = build_transfer_call(mock_address, to, amount);
     let calls = array![call];
 
-    let result = execute_session_calls(account_address, @calls);
+    let result = execute_session_calls(account_address, @calls, 0_u128, session_pubkey);
 
     assert_reverted_with(result, ERR_VALUE_LIMIT_EXCEEDED);
 

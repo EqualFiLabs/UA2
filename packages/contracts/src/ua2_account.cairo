@@ -9,8 +9,12 @@ pub mod UA2Account {
     use core::option::Option;
     use core::traits::{Into, TryInto};
     use core::integer::u256;
+    use core::serde::Serde;
+    use core::ecdsa::check_ecdsa_signature;
+    use core::poseidon::poseidon_hash_span;
     use openzeppelin::account::interface;
     use starknet::account::Call;
+    use core::pedersen::pedersen;
     use starknet::storage::Map;
     use starknet::syscalls::call_contract_syscall;
     use starknet::{
@@ -19,6 +23,7 @@ pub mod UA2Account {
         get_block_timestamp,
         get_caller_address,
         get_contract_address,
+        get_execution_info,
     };
 
     component!(path: AccountComponent, storage: account, event: AccountEvent);
@@ -31,6 +36,8 @@ pub mod UA2Account {
     const ERR_POLICY_TARGET_DENIED: felt252 = 'ERR_POLICY_TARGET_DENIED';
     const ERR_VALUE_LIMIT_EXCEEDED: felt252 = 'ERR_VALUE_LIMIT_EXCEEDED';
     const ERR_POLICY_CALLCOUNT_MISMATCH: felt252 = 'ERR_POLICY_CALLCOUNT_MISMATCH';
+    const ERR_BAD_SESSION_NONCE: felt252 = 'ERR_BAD_SESSION_NONCE';
+    const ERR_SESSION_SIG_INVALID: felt252 = 'ERR_SESSION_SIG_INVALID';
     const ERC20_TRANSFER_SEL: felt252 = 0x83afd3f4caedc6eebf44246fe54e38c95e3179a5ec9ea81740eca5b482d12e;
     const APPLY_SESSION_USAGE_SELECTOR: felt252 = starknet::selector!("apply_session_usage");
 
@@ -74,6 +81,12 @@ pub mod UA2Account {
         pub used: u32,
     }
 
+    #[derive(Drop, starknet::Event)]
+    pub struct SessionNonceAdvanced {
+        pub key_hash: felt252,
+        pub new_nonce: u128,
+    }
+
     #[starknet::interface]
     pub trait ISessionManager<TContractState> {
         fn add_session(ref self: TContractState, key: felt252, policy: SessionPolicy);
@@ -91,6 +104,7 @@ pub mod UA2Account {
         SessionAdded: SessionAdded,
         SessionRevoked: SessionRevoked,
         SessionUsed: SessionUsed,
+        SessionNonceAdvanced: SessionNonceAdvanced,
     }
 
     #[constructor]
@@ -114,6 +128,10 @@ pub mod UA2Account {
         assert(condition, error);
     }
 
+    fn derive_key_hash(key: felt252) -> felt252 {
+        pedersen(key, 0)
+    }
+
     fn u256_le(lhs: u256, rhs: u256) -> bool {
         if lhs.high < rhs.high {
             true
@@ -135,7 +153,7 @@ pub mod UA2Account {
         assert_owner();
         self.add_session(key, policy);
 
-        let key_hash = key;
+        let key_hash = derive_key_hash(key);
 
         let mut i = 0_usize;
         let targets_len = ArrayTrait::<ContractAddress>::len(@targets);
@@ -160,6 +178,7 @@ pub mod UA2Account {
         key_hash: felt252,
         prior_calls_used: u32,
         tx_call_count: u32,
+        provided_nonce: u128,
     ) {
         let mut policy = self.session.read(key_hash);
 
@@ -173,10 +192,17 @@ pub mod UA2Account {
         let updated_calls_used = checked_add_u32(policy.calls_used, tx_call_count);
         require(updated_calls_used <= policy.max_calls, ERR_POLICY_CALLCAP);
 
+        let stored_nonce = self.session_nonce.read(key_hash);
+        require(stored_nonce == provided_nonce, ERR_BAD_SESSION_NONCE);
+
+        let new_nonce = provided_nonce + 1_u128;
+
         policy.calls_used = updated_calls_used;
         self.session.write(key_hash, policy);
+        self.session_nonce.write(key_hash, new_nonce);
 
         self.emit(Event::SessionUsed(SessionUsed { key_hash, used: tx_call_count }));
+        self.emit(Event::SessionNonceAdvanced(SessionNonceAdvanced { key_hash, new_nonce }));
     }
 
     #[abi(embed_v0)]
@@ -187,7 +213,7 @@ pub mod UA2Account {
             assert(policy.expires_at > 0_u64, 'BAD_EXPIRY');
             assert(policy.max_calls > 0_u32, 'BAD_MAX_CALLS');
 
-            let key_hash = key;
+            let key_hash = derive_key_hash(key);
 
             policy.is_active = true;
             policy.calls_used = 0_u32;
@@ -216,11 +242,16 @@ pub mod UA2Account {
         }
     }
 
+    const MODE_OWNER: felt252 = 0;
+    const MODE_SESSION: felt252 = 1;
+    const SESSION_DOMAIN_TAG: felt252 = 0x5541325f53455353494f4e5f5631;
+
     #[derive(Copy, Drop)]
     struct SessionValidation {
         key_hash: felt252,
         policy: SessionPolicy,
         tx_call_count: u32,
+        provided_nonce: u128,
     }
 
     fn checked_add_u32(lhs: u32, rhs: u32) -> u32 {
@@ -229,12 +260,99 @@ pub mod UA2Account {
         sum
     }
 
+    fn poseidon_chain(acc: felt252, value: felt252) -> felt252 {
+        let mut values = array![acc, value];
+        poseidon_hash_span(values.span())
+    }
+
+    fn hash_calldata(calldata: Span<felt252>) -> felt252 {
+        let mut hash = 0_felt252;
+        for item in calldata {
+            hash = poseidon_chain(hash, *item);
+        }
+
+        hash
+    }
+
+    fn hash_call(call: Call) -> felt252 {
+        let calldata_hash = hash_calldata(call.calldata);
+        let selector_hash = poseidon_chain(call.selector, calldata_hash);
+        let to_felt: felt252 = call.to.into();
+
+        poseidon_chain(to_felt, selector_hash)
+    }
+
+    fn hash_calls(calls: @Array<Call>) -> felt252 {
+        let mut digest = 0_felt252;
+
+        for call_ref in calls.span() {
+            let call_hash = hash_call(*call_ref);
+            digest = poseidon_chain(digest, call_hash);
+        }
+
+        digest
+    }
+
+    fn combine_nonce_parts(low: u128, high: u128) -> u128 {
+        let high_limit = 0x10000000000000000_u128;
+        require(high < high_limit, ERR_BAD_SESSION_NONCE);
+        require(low < high_limit, ERR_BAD_SESSION_NONCE);
+
+        low + high * high_limit
+    }
+
+    fn compute_session_message_hash(
+        chain_id: felt252,
+        account_felt: felt252,
+        key_hash: felt252,
+        nonce: u128,
+        call_digest: felt252,
+    ) -> felt252 {
+        let mut values = array![
+            SESSION_DOMAIN_TAG,
+            chain_id,
+            account_felt,
+            key_hash,
+            nonce.into(),
+            call_digest,
+        ];
+        poseidon_hash_span(values.span())
+    }
+
     fn validate_session_policy(
         self: @ContractState,
         signature: Span<felt252>,
         calls: @Array<Call>,
     ) -> SessionValidation {
-        let key_hash = *signature.at(0_usize);
+        let signature_len = signature.len();
+        require(signature_len >= 6_usize, ERR_SESSION_SIG_INVALID);
+
+        let mode = *signature.at(0_usize);
+        require(mode == MODE_SESSION, ERR_SESSION_SIG_INVALID);
+
+        let session_key = *signature.at(1_usize);
+        let key_hash = derive_key_hash(session_key);
+
+        let nonce_low_felt = *signature.at(2_usize);
+        let nonce_high_felt = *signature.at(3_usize);
+
+        let nonce_low: u128 = match nonce_low_felt.try_into() {
+            Option::Some(value) => value,
+            Option::None(_) => {
+                assert(false, ERR_BAD_SESSION_NONCE);
+                0_u128
+            },
+        };
+
+        let nonce_high: u128 = match nonce_high_felt.try_into() {
+            Option::Some(value) => value,
+            Option::None(_) => {
+                assert(false, ERR_BAD_SESSION_NONCE);
+                0_u128
+            },
+        };
+
+        let provided_nonce = combine_nonce_parts(nonce_low, nonce_high);
         let policy = self.session.read(key_hash);
 
         require(policy.is_active, ERR_SESSION_INACTIVE);
@@ -297,7 +415,30 @@ pub mod UA2Account {
             }
         }
 
-        SessionValidation { key_hash, policy, tx_call_count }
+        let expected_nonce = self.session_nonce.read(key_hash);
+        require(provided_nonce == expected_nonce, ERR_BAD_SESSION_NONCE);
+
+        let call_digest = hash_calls(calls);
+
+        let execution_info = get_execution_info().unbox();
+        let chain_id = execution_info.tx_info.unbox().chain_id;
+        let account_address = get_contract_address();
+        let account_felt: felt252 = account_address.into();
+        let message = compute_session_message_hash(
+            chain_id,
+            account_felt,
+            key_hash,
+            provided_nonce,
+            call_digest,
+        );
+
+        let sig_r = *signature.at(4_usize);
+        let sig_s = *signature.at(5_usize);
+
+        let signature_valid = check_ecdsa_signature(message, session_key, sig_r, sig_s);
+        require(signature_valid, ERR_SESSION_SIG_INVALID);
+
+        SessionValidation { key_hash, policy, tx_call_count, provided_nonce }
     }
 
     #[abi(embed_v0)]
@@ -324,6 +465,7 @@ pub mod UA2Account {
             accounting_calldata.append(validation.key_hash);
             accounting_calldata.append(validation.policy.calls_used.into());
             accounting_calldata.append(validation.tx_call_count.into());
+            Serde::<u128>::serialize(@validation.provided_nonce, ref accounting_calldata);
 
             let _ = call_contract_syscall(
                 get_contract_address(),

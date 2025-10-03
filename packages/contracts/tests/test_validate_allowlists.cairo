@@ -23,12 +23,18 @@ use ua2_contracts::ua2_account::UA2Account::{
     Event,
     ISessionManagerDispatcher,
     ISessionManagerDispatcherTrait,
+    SessionNonceAdvanced,
     SessionPolicy,
     SessionUsed,
 };
 
+use crate::session_test_utils::{
+    build_session_signature,
+    session_key,
+    session_key_hash,
+};
+
 const OWNER_PUBKEY: felt252 = 0x12345;
-const SESSION_KEY: felt252 = 0xCAFEBABE;
 const TRANSFER_SELECTOR: felt252 = starknet::selector!("transfer");
 
 #[test]
@@ -56,7 +62,9 @@ fn session_allows_whitelisted_calls() {
 
     start_cheat_caller_address(account_address, account_address);
     let mut allowlist_calldata = array![];
-    allowlist_calldata.append(SESSION_KEY);
+    let session_pubkey = session_key();
+    let key_hash = session_key_hash();
+    allowlist_calldata.append(session_pubkey);
     allowlist_calldata.append(1.into());
     allowlist_calldata.append(expires_at.into());
     allowlist_calldata.append(policy.max_calls.into());
@@ -77,7 +85,7 @@ fn session_allows_whitelisted_calls() {
     stop_cheat_caller_address(account_address);
 
     let session_dispatcher = ISessionManagerDispatcher { contract_address: account_address };
-    let stored_policy = session_dispatcher.get_session(SESSION_KEY);
+    let stored_policy = session_dispatcher.get_session(key_hash);
     assert(stored_policy.is_active == true, 'session inactive');
 
     let amount = u256 { low: 500_u128, high: 0_u128 };
@@ -91,10 +99,11 @@ fn session_allows_whitelisted_calls() {
     let call = Call { to: mock_address, selector: TRANSFER_SELECTOR, calldata: calldata.span() };
     let mut calls = array![call];
 
-    let key_hash = SESSION_KEY;
     let zero_contract: ContractAddress = 0.try_into().unwrap();
     start_cheat_caller_address(account_address, zero_contract);
-    start_cheat_signature(account_address, array![SESSION_KEY].span());
+    let signature: Array<felt252> =
+        build_session_signature(account_address, session_pubkey, 0_u128, @calls);
+    start_cheat_signature(account_address, signature.span());
     let mut execute_calldata = array![];
     Serde::<Array<Call>>::serialize(@calls, ref execute_calldata);
     call_contract_syscall(
@@ -112,6 +121,10 @@ fn session_allows_whitelisted_calls() {
         (
             account_address,
             Event::SessionUsed(SessionUsed { key_hash, used: 1_u32 }),
+        ),
+        (
+            account_address,
+            Event::SessionNonceAdvanced(SessionNonceAdvanced { key_hash, new_nonce: 1_u128 }),
         ),
     ]);
 

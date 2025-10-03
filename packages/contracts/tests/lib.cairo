@@ -4,6 +4,9 @@ mod test_validate_allowlists;
 mod test_validate_denials;
 mod test_session_nonce_ok;
 mod test_session_nonce_replay_and_mismatch;
+mod test_guardians_admin;
+mod test_recovery_happy;
+mod test_recovery_edgecases;
 
 pub mod session_test_utils {
     use core::array::{Array, ArrayTrait};

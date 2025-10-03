@@ -70,6 +70,8 @@ pub mod UA2Account {
         recovery_eta: u64,
         recovery_confirms: LegacyMap<ContractAddress, bool>,
         recovery_confirm_count: u32,
+        recovery_proposal_id: u64,
+        recovery_guardian_last_confirm: LegacyMap<ContractAddress, u64>,
     }
 
     #[derive(Copy, Drop, Serde, starknet::Store)]
@@ -107,12 +109,12 @@ pub mod UA2Account {
 
     #[derive(Drop, starknet::Event)]
     pub struct GuardianAdded {
-        pub guardian: ContractAddress,
+        pub addr: ContractAddress,
     }
 
     #[derive(Drop, starknet::Event)]
     pub struct GuardianRemoved {
-        pub guardian: ContractAddress,
+        pub addr: ContractAddress,
     }
 
     #[derive(Drop, starknet::Event)]
@@ -127,14 +129,15 @@ pub mod UA2Account {
 
     #[derive(Drop, starknet::Event)]
     pub struct RecoveryProposed {
-        pub proposed_owner: felt252,
+        pub new_owner: felt252,
         pub eta: u64,
     }
 
     #[derive(Drop, starknet::Event)]
     pub struct RecoveryConfirmed {
         pub guardian: ContractAddress,
-        pub confirm_count: u32,
+        pub new_owner: felt252,
+        pub count: u32,
     }
 
     #[derive(Drop, starknet::Event)]
@@ -256,6 +259,169 @@ pub mod UA2Account {
 
     fn derive_key_hash(key: felt252) -> felt252 {
         pedersen(key, 0)
+    }
+
+    fn assert_guardian(self: @ContractState, caller: ContractAddress) {
+        let is_guardian = self.guardians.read(caller);
+        assert(is_guardian == true, ERR_NOT_GUARDIAN);
+    }
+
+    fn _clear_recovery_state(ref self: ContractState) {
+        self.recovery_active.write(false);
+        self.recovery_proposed_owner.write(0_felt252);
+        self.recovery_eta.write(0_u64);
+        self.recovery_confirm_count.write(0_u32);
+    }
+
+    #[external(v0)]
+    fn add_guardian(ref self: ContractState, addr: ContractAddress) {
+        assert_owner();
+
+        let exists = self.guardians.read(addr);
+        assert(exists == false, ERR_GUARDIAN_EXISTS);
+
+        self.guardians.write(addr, true);
+        let new_count = self.guardian_count.read() + 1_u32;
+        self.guardian_count.write(new_count);
+
+        self.emit(Event::GuardianAdded(GuardianAdded { addr }));
+    }
+
+    #[external(v0)]
+    fn remove_guardian(ref self: ContractState, addr: ContractAddress) {
+        assert_owner();
+
+        let exists = self.guardians.read(addr);
+        assert(exists == true, ERR_NOT_GUARDIAN);
+
+        self.guardians.write(addr, false);
+        let current = self.guardian_count.read();
+        let new_count = current - 1_u32;
+        self.guardian_count.write(new_count);
+
+        let threshold = self.guardian_threshold.read();
+        let threshold_u32: u32 = threshold.into();
+        assert(threshold_u32 <= new_count, ERR_BAD_THRESHOLD);
+
+        self.emit(Event::GuardianRemoved(GuardianRemoved { addr }));
+    }
+
+    #[external(v0)]
+    fn set_guardian_threshold(ref self: ContractState, threshold: u8) {
+        assert_owner();
+
+        let guardian_total = self.guardian_count.read();
+        let threshold_u32: u32 = threshold.into();
+
+        assert(threshold > 0_u8 && threshold_u32 <= guardian_total, ERR_BAD_THRESHOLD);
+
+        self.guardian_threshold.write(threshold);
+        self.emit(Event::ThresholdSet(ThresholdSet { threshold }));
+    }
+
+    #[external(v0)]
+    fn set_recovery_delay(ref self: ContractState, delay: u64) {
+        assert_owner();
+
+        self.recovery_delay.write(delay);
+        self.emit(Event::RecoveryDelaySet(RecoveryDelaySet { delay }));
+    }
+
+    #[external(v0)]
+    fn propose_recovery(ref self: ContractState, new_owner: felt252) {
+        let caller = get_caller_address();
+        assert_guardian(@self, caller);
+
+        let active = self.recovery_active.read();
+        assert(active == false, ERR_RECOVERY_IN_PROGRESS);
+
+        let now = get_block_timestamp();
+        let eta = now + self.recovery_delay.read();
+
+        let proposal_id = self.recovery_proposal_id.read() + 1_u64;
+        self.recovery_proposal_id.write(proposal_id);
+
+        self.recovery_active.write(true);
+        self.recovery_proposed_owner.write(new_owner);
+        self.recovery_eta.write(eta);
+        self.recovery_confirm_count.write(0_u32);
+
+        self.recovery_confirms.write(caller, true);
+        self.recovery_guardian_last_confirm.write(caller, proposal_id);
+        self.recovery_confirm_count.write(1_u32);
+        self.emit(
+            Event::RecoveryConfirmed(RecoveryConfirmed {
+                guardian: caller,
+                new_owner,
+                count: 1_u32,
+            }),
+        );
+
+        self.emit(Event::RecoveryProposed(RecoveryProposed { new_owner, eta }));
+    }
+
+    #[external(v0)]
+    fn confirm_recovery(ref self: ContractState, new_owner: felt252) {
+        let caller = get_caller_address();
+        assert_guardian(@self, caller);
+
+        let active = self.recovery_active.read();
+        assert(active == true, ERR_NO_RECOVERY);
+
+        let proposed_owner = self.recovery_proposed_owner.read();
+        assert(proposed_owner == new_owner, ERR_RECOVERY_MISMATCH);
+
+        let proposal_id = self.recovery_proposal_id.read();
+        let last_confirm = self.recovery_guardian_last_confirm.read(caller);
+        assert(last_confirm != proposal_id, ERR_ALREADY_CONFIRMED);
+
+        self.recovery_confirms.write(caller, true);
+        self.recovery_guardian_last_confirm.write(caller, proposal_id);
+
+        let new_count = self.recovery_confirm_count.read() + 1_u32;
+        self.recovery_confirm_count.write(new_count);
+
+        self.emit(
+            Event::RecoveryConfirmed(RecoveryConfirmed {
+                guardian: caller,
+                new_owner,
+                count: new_count,
+            }),
+        );
+    }
+
+    #[external(v0)]
+    fn cancel_recovery(ref self: ContractState) {
+        assert_owner();
+
+        let active = self.recovery_active.read();
+        assert(active == true, ERR_NO_RECOVERY);
+
+        _clear_recovery_state(ref self);
+
+        self.emit(Event::RecoveryCanceled(RecoveryCanceled {}));
+    }
+
+    #[external(v0)]
+    fn execute_recovery(ref self: ContractState) {
+        let active = self.recovery_active.read();
+        assert(active == true, ERR_NO_RECOVERY);
+
+        let threshold = self.guardian_threshold.read();
+        let threshold_u32: u32 = threshold.into();
+        let confirms = self.recovery_confirm_count.read();
+        assert(confirms >= threshold_u32, ERR_NOT_ENOUGH_CONFIRMS);
+
+        let now = get_block_timestamp();
+        let eta = self.recovery_eta.read();
+        assert(now >= eta, ERR_BEFORE_ETA);
+
+        let new_owner = self.recovery_proposed_owner.read();
+        self.owner_pubkey.write(new_owner);
+
+        _clear_recovery_state(ref self);
+
+        self.emit(Event::RecoveryExecuted(RecoveryExecuted { new_owner }));
     }
 
     fn u256_le(lhs: u256, rhs: u256) -> bool {

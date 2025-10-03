@@ -23,12 +23,33 @@ use ua2_contracts::ua2_account::UA2Account::{
 const OWNER_PUBKEY: felt252 = 0x12345;
 const ERR_GUARDIAN_EXISTS: felt252 = 'ERR_GUARDIAN_EXISTS';
 const ERR_BAD_THRESHOLD: felt252 = 'ERR_BAD_THRESHOLD';
+const ERR_NOT_GUARDIAN: felt252 = 'ERR_NOT_GUARDIAN';
 
 fn deploy_account() -> ContractAddress {
     let declare_result = declare("UA2Account").unwrap();
     let contract_class = declare_result.contract_class();
     let (contract_address, _) = contract_class.deploy(@array![OWNER_PUBKEY]).unwrap_syscall();
     contract_address
+}
+
+fn call_with_guardian(
+    contract_address: ContractAddress,
+    selector: felt252,
+    guardian: ContractAddress,
+) -> SyscallResult<Span<felt252>> {
+    let mut calldata = array![];
+    calldata.append(guardian.into());
+    call_contract_syscall(contract_address, selector, calldata.span())
+}
+
+fn call_with_value(
+    contract_address: ContractAddress,
+    selector: felt252,
+    value: felt252,
+) -> SyscallResult<Span<felt252>> {
+    let mut calldata = array![];
+    calldata.append(value);
+    call_contract_syscall(contract_address, selector, calldata.span())
 }
 
 fn assert_reverted_with(result: SyscallResult<Span<felt252>>, expected: felt252) {
@@ -51,80 +72,52 @@ fn guardians_admin_works() {
     let g1: ContractAddress = 0x111.try_into().unwrap();
     let g2: ContractAddress = 0x222.try_into().unwrap();
     let g3: ContractAddress = 0x333.try_into().unwrap();
+    let g4: ContractAddress = 0x444.try_into().unwrap();
 
     let mut spy = spy_events();
 
     start_cheat_caller_address(contract_address, contract_address);
 
-    let mut add_calldata = array![];
-    add_calldata.append(g1.into());
-    call_contract_syscall(
-        contract_address,
-        starknet::selector!("add_guardian"),
-        add_calldata.span(),
-    )
-    .unwrap_syscall();
+    call_with_guardian(contract_address, starknet::selector!("add_guardian"), g1)
+        .unwrap_syscall();
+    call_with_guardian(contract_address, starknet::selector!("add_guardian"), g2)
+        .unwrap_syscall();
+    call_with_guardian(contract_address, starknet::selector!("add_guardian"), g3)
+        .unwrap_syscall();
 
-    let mut add_calldata = array![];
-    add_calldata.append(g2.into());
-    call_contract_syscall(
+    let duplicate = call_with_guardian(
         contract_address,
         starknet::selector!("add_guardian"),
-        add_calldata.span(),
-    )
-    .unwrap_syscall();
-
-    let mut add_calldata = array![];
-    add_calldata.append(g3.into());
-    call_contract_syscall(
-        contract_address,
-        starknet::selector!("add_guardian"),
-        add_calldata.span(),
-    )
-    .unwrap_syscall();
-
-    let mut duplicate_calldata = array![];
-    duplicate_calldata.append(g1.into());
-    let duplicate = call_contract_syscall(
-        contract_address,
-        starknet::selector!("add_guardian"),
-        duplicate_calldata.span(),
+        g1,
     );
     assert_reverted_with(duplicate, ERR_GUARDIAN_EXISTS);
 
-    let mut threshold_calldata = array![];
-    threshold_calldata.append(2.into());
-    call_contract_syscall(
+    call_with_value(
         contract_address,
         starknet::selector!("set_guardian_threshold"),
-        threshold_calldata.span(),
+        2.into(),
     )
     .unwrap_syscall();
-
-    let mut delay_calldata = array![];
-    delay_calldata.append(60_u64.into());
-    call_contract_syscall(
+    call_with_value(
         contract_address,
         starknet::selector!("set_recovery_delay"),
-        delay_calldata.span(),
+        60_u64.into(),
     )
     .unwrap_syscall();
+    call_with_guardian(contract_address, starknet::selector!("remove_guardian"), g3)
+        .unwrap_syscall();
 
-    let mut remove_calldata = array![];
-    remove_calldata.append(g3.into());
-    call_contract_syscall(
+    let bad_remove = call_with_guardian(
         contract_address,
         starknet::selector!("remove_guardian"),
-        remove_calldata.span(),
-    )
-    .unwrap_syscall();
+        g4,
+    );
+    assert_reverted_with(bad_remove, ERR_NOT_GUARDIAN);
 
-    let mut bad_threshold_calldata = array![];
-    bad_threshold_calldata.append(3.into());
-    let bad_threshold = call_contract_syscall(
+    let bad_threshold = call_with_value(
         contract_address,
         starknet::selector!("set_guardian_threshold"),
-        bad_threshold_calldata.span(),
+        3.into(),
     );
     assert_reverted_with(bad_threshold, ERR_BAD_THRESHOLD);
 

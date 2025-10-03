@@ -220,6 +220,30 @@ pub mod UA2Account {
         self.emit(Event::GuardianRemoved(GuardianRemoved { guardian }));
     }
 
+    #[external(v0)]
+    fn set_guardian_threshold(ref self: ContractState, threshold: u8) {
+        assert_owner();
+
+        require(threshold > 0_u8, ERR_BAD_THRESHOLD);
+
+        let count = self.guardian_count.read();
+        let threshold_u32: u32 = threshold.into();
+        require(threshold_u32 <= count, ERR_BAD_THRESHOLD);
+
+        self.guardian_threshold.write(threshold);
+
+        self.emit(Event::ThresholdSet(ThresholdSet { threshold }));
+    }
+
+    #[external(v0)]
+    fn set_recovery_delay(ref self: ContractState, delay: u64) {
+        assert_owner();
+
+        self.recovery_delay.write(delay);
+
+        self.emit(Event::RecoveryDelaySet(RecoveryDelaySet { delay }));
+    }
+
     fn assert_owner() {
         let caller: ContractAddress = get_caller_address();
         let contract_address: ContractAddress = get_contract_address();

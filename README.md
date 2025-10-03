@@ -46,6 +46,11 @@ cd packages/contracts
 scarb build
 ```
 
+> [!TIP]
+> The repo pins `scarb 2.12.0` via `.tool-versions` and expects it to be provided by
+> [mise](https://mise.jdx.dev/). If `scarb` is not on your `PATH`, install the pinned version with
+> `mise install scarb@2.12.0` (or ensure `/root/.asdf/shims` is exported when using `asdf`).
+
 ### 3. Deploy to Sepolia
 
 ```bash
@@ -80,6 +85,12 @@ For full walkthrough: [`docs/runbook-sepolia.md`](./docs/runbook-sepolia.md)
   cd packages/contracts
   snforge test -vv
   ```
+
+  > [!NOTE]
+  > The setup script installs `snforge` via the `asdf` `starknet-foundry` plugin.
+  > Export the `asdf` shims directory (e.g. `~/.asdf/shims`) to your `PATH`, or call
+  > the binary directly from the install root (e.g. `~/.asdf/installs/starknet-foundry/0.48.1/bin/snforge`)
+  > if the command is not found.
 * **TS/SDK tests:**
 
   ```bash

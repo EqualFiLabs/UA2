@@ -1,0 +1,12 @@
+{
+  "name": "@ua2/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "echo \"Contracts are built via 'npm run contracts:build'\"",
+    "lint": "echo \"No linting for Cairo sources\"",
+    "test": "echo \"Contract tests run via 'npm run contracts:test'\"",
+    "typecheck": "echo \"No TypeScript typecheck for Cairo sources\""
+  }
+}

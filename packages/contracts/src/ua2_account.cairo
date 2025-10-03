@@ -46,6 +46,8 @@ pub mod UA2Account {
     const ERR_ALREADY_CONFIRMED: felt252 = 'ERR_ALREADY_CONFIRMED';
     const ERR_BEFORE_ETA: felt252 = 'ERR_BEFORE_ETA';
     const ERR_NOT_ENOUGH_CONFIRMS: felt252 = 'ERR_NOT_ENOUGH_CONFIRMS';
+    const ERR_ZERO_OWNER: felt252 = 'ERR_ZERO_OWNER';
+    const ERR_SAME_OWNER: felt252 = 'ERR_SAME_OWNER';
     const ERC20_TRANSFER_SEL: felt252 = 0x83afd3f4caedc6eebf44246fe54e38c95e3179a5ec9ea81740eca5b482d12e;
     const APPLY_SESSION_USAGE_SELECTOR: felt252 = starknet::selector!("apply_session_usage");
 
@@ -359,6 +361,22 @@ pub mod UA2Account {
         _clear_recovery_state(ref self);
 
         self.emit(Event::RecoveryCanceled(RecoveryCanceled {}));
+    }
+
+    #[external(v0)]
+    fn rotate_owner(ref self: ContractState, new_owner: felt252) {
+        assert_owner();
+
+        let active = self.recovery_active.read();
+        assert(active == false, ERR_RECOVERY_IN_PROGRESS);
+
+        assert(new_owner != 0_felt252, ERR_ZERO_OWNER);
+
+        let current = self.owner_pubkey.read();
+        assert(new_owner != current, ERR_SAME_OWNER);
+
+        self.owner_pubkey.write(new_owner);
+        self.emit(Event::OwnerRotated(OwnerRotated { new_owner }));
     }
 
     #[external(v0)]

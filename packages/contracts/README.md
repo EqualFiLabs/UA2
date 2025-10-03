@@ -40,3 +40,12 @@ snforge test -vv
   - `ERR_ALREADY_CONFIRMED` — guardian has already confirmed the current proposal.
   - `ERR_NOT_ENOUGH_CONFIRMS` — required guardian threshold has not been met during execution.
   - `ERR_BEFORE_ETA` — cooldown window has not elapsed prior to execution.
+
+## Owner Rotation (Task 1.6)
+
+- `rotate_owner(new_owner)` — **owner-only** direct rotation.
+- Emits `OwnerRotated(new_owner)`.
+- Safety checks:
+  - Rejects `new_owner == 0`.
+  - Rejects rotating to current owner.
+  - If a recovery is active, rotation reverts (`ERR_RECOVERY_IN_PROGRESS`) — cancel first via `cancel_recovery()`.

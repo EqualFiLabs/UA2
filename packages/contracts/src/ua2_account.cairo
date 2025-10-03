@@ -127,6 +127,11 @@ pub mod UA2Account {
     }
 
     #[derive(Drop, starknet::Event)]
+    pub struct OwnerRotated {
+        pub new_owner: felt252,
+    }
+
+    #[derive(Drop, starknet::Event)]
     pub struct RecoveryProposed {
         pub new_owner: felt252,
         pub eta: u64,
@@ -169,6 +174,7 @@ pub mod UA2Account {
         GuardianRemoved: GuardianRemoved,
         ThresholdSet: ThresholdSet,
         RecoveryDelaySet: RecoveryDelaySet,
+        OwnerRotated: OwnerRotated,
         RecoveryProposed: RecoveryProposed,
         RecoveryConfirmed: RecoveryConfirmed,
         RecoveryCanceled: RecoveryCanceled,
@@ -374,6 +380,7 @@ pub mod UA2Account {
 
         _clear_recovery_state(ref self);
 
+        self.emit(Event::OwnerRotated(OwnerRotated { new_owner }));
         self.emit(Event::RecoveryExecuted(RecoveryExecuted { new_owner }));
     }
 

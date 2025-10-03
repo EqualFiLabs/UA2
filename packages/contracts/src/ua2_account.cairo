@@ -290,16 +290,19 @@ pub mod UA2Account {
         self.recovery_eta.write(eta);
         self.recovery_confirm_count.write(0_u32);
 
-        self.recovery_confirms.write(caller, true);
-        self.recovery_guardian_last_confirm.write(caller, proposal_id);
-        self.recovery_confirm_count.write(1_u32);
-        self.emit(
-            Event::RecoveryConfirmed(RecoveryConfirmed {
-                guardian: caller,
-                new_owner,
-                count: 1_u32,
-            }),
-        );
+        let last_confirm = self.recovery_guardian_last_confirm.read(caller);
+        if last_confirm != proposal_id {
+            self.recovery_confirms.write(caller, true);
+            self.recovery_guardian_last_confirm.write(caller, proposal_id);
+            self.recovery_confirm_count.write(1_u32);
+            self.emit(
+                Event::RecoveryConfirmed(RecoveryConfirmed {
+                    guardian: caller,
+                    new_owner,
+                    count: 1_u32,
+                }),
+            );
+        }
 
         self.emit(Event::RecoveryProposed(RecoveryProposed { new_owner, eta }));
     }
@@ -315,12 +318,10 @@ pub mod UA2Account {
         let proposed_owner = self.recovery_proposed_owner.read();
         assert(proposed_owner == new_owner, ERR_RECOVERY_MISMATCH);
 
-        let proposal_id = self.recovery_proposal_id.read();
-        let last_confirm = self.recovery_guardian_last_confirm.read(caller);
-        assert(last_confirm != proposal_id, ERR_ALREADY_CONFIRMED);
+        let already_confirmed = self.recovery_confirms.read(caller);
+        assert(already_confirmed == false, ERR_ALREADY_CONFIRMED);
 
         self.recovery_confirms.write(caller, true);
-        self.recovery_guardian_last_confirm.write(caller, proposal_id);
 
         let new_count = self.recovery_confirm_count.read() + 1_u32;
         self.recovery_confirm_count.write(new_count);

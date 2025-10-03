@@ -49,3 +49,68 @@ snforge test -vv
   - Rejects `new_owner == 0`.
   - Rejects rotating to current owner.
   - If a recovery is active, rotation reverts (`ERR_RECOVERY_IN_PROGRESS`) — cancel first via `cancel_recovery()`.
+
+## Deploying to Starknet Sepolia
+
+We ship portable `sncast` scripts that work without global Foundry profiles.
+
+### 0) Prereqs
+- `scarb`, `snforge`, `sncast` installed
+- Build contracts once:
+  ```bash
+  scarb build
+  ```
+- Copy env template and fill values:
+
+  ```bash
+  cp packages/contracts/scripts/.env.sepolia.example .env.sepolia
+  # edit .env.sepolia: set STARKNET_RPC_URL, and either SNCAST_KEYSTORE_PATH or SNCAST_PRIVATE_KEY.
+  ```
+
+### 1) Declare class hash
+
+```bash
+cd packages/contracts
+source ./scripts/.env.sepolia
+./scripts/declare_ua2.sh
+# Outputs UA2_CLASS_HASH and stores it in .ua2-sepolia-addresses.json
+```
+
+### 2) Deploy UA² (direct by default)
+
+```bash
+./scripts/deploy_ua2.sh
+# Writes UA2_PROXY_ADDR (the deployed contract addr) into .ua2-sepolia-addresses.json
+```
+
+### 3) (Optional) Proxy/UUPS path
+
+If/when `UA2Account` implements UUPS, set:
+
+```
+UA2_USE_PROXY=1
+```
+
+in `.env.sepolia` and adapt `upgrade_ua2.sh` with your upgrade entrypoint. Then:
+
+```bash
+./scripts/upgrade_ua2.sh
+```
+
+### Outputs
+
+* `.ua2-sepolia-addresses.json` generated in `packages/contracts/`:
+
+  ```json
+  {
+    "UA2_CLASS_HASH": "0x...",
+    "UA2_PROXY_ADDR": "0x...",
+    "UA2_IMPLEMENTATION_ADDR": "0x..."
+  }
+  ```
+
+### Troubleshooting
+
+* `sncast declare/deploy` fails: check RPC/key; try again later (Sepolia endpoints rate-limit).
+* Missing class hash: ensure `target/dev/UA2Account.sierra.json` exists (`scarb build`).
+* Auth error: set either `SNCAST_KEYSTORE_PATH` (recommended) or `SNCAST_PRIVATE_KEY` in `.env.sepolia`.

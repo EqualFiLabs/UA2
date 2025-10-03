@@ -16,7 +16,7 @@
     "typecheck": "npm -ws run typecheck",
     "ci": "npm run lint && npm run typecheck && npm run build && npm run test",
     "contracts:build": "cd packages/contracts && scarb build",
-    "contracts:test": "cd packages/contracts && snforge test -q"
+    "contracts:test": "cd packages/contracts && PATH=\"$HOME/.asdf/shims:$PATH\" snforge test"
   },
   "devDependencies": {
     "@typescript-eslint/eslint-plugin": "^7.18.0",

@@ -41,3 +41,9 @@ jobs:
         uses: foundry-rs/setup-snfoundry@v3
       - run: npm run contracts:build
       - run: npm run contracts:test
+      - name: Scripts sanity (no execution)
+        run: |
+          bash -n packages/contracts/scripts/helpers.sh
+          bash -n packages/contracts/scripts/declare_ua2.sh
+          bash -n packages/contracts/scripts/deploy_ua2.sh
+          bash -n packages/contracts/scripts/upgrade_ua2.sh

@@ -1,8 +1,6 @@
 /**
- * Minimal wallet/provider interfaces to avoid taking a runtime dependency
- * on starknet.js. Real adapters can wrap starknet.js accounts later.
+ * Core types used across UA² SDK.
  */
-
 export type Felt = string;
 
 /** A minimal account surface we need right now. */
@@ -57,6 +55,8 @@ export interface ConnectOptions {
   hints?: Record<string, Record<string, unknown>>;
 }
 
+/* ------------------ Sessions & Policy ------------------ */
+
 /** Successful connection result. */
 export interface UA2Client {
   /** Selected connector id */
@@ -69,6 +69,81 @@ export interface UA2Client {
   /** Convenience: address string */
   address: Felt;
 
+  /** Sessions manager for session keys and policies. */
+  sessions: SessionsManager;
+
   /** Disconnect hook (no-op for now, placeholder for future sessions) */
   disconnect(): Promise<void>;
+}
+
+/** Uint256 encoded as two felts [low, high] in hex strings. */
+export type Uint256 = readonly [Felt, Felt];
+
+export interface SessionLimits {
+  /** Max number of calls this session can perform total. */
+  maxCalls: number;
+  /** Maximum value per call in wei-style units, encoded as Uint256. */
+  maxValuePerCall: Uint256;
+}
+
+export interface SessionAllow {
+  /** Allowed contract addresses (as felts). */
+  targets: Felt[];
+  /** Allowed function selectors (as felts). */
+  selectors: Felt[];
+}
+
+export interface SessionPolicyInput {
+  /** Expiration timestamp (seconds since epoch). */
+  expiresAt: number;
+  /** Limits per session. */
+  limits: SessionLimits;
+  /** Allowlist constraints. */
+  allow: SessionAllow;
+  /** Whether the session is active on creation. Default true. */
+  active?: boolean;
+}
+
+/** The on-chain policy struct shape (Cairo ordering). */
+export interface SessionPolicyCalldata {
+  is_active: Felt;            // 0x0 or 0x1
+  expires_at: Felt;           // u64 -> felt
+  max_calls: Felt;            // u32 -> felt
+  calls_used: Felt;           // u32 -> felt (init 0)
+  max_value_per_call_low: Felt;
+  max_value_per_call_high: Felt;
+  // Arrays come separately as (len, items...)
+}
+
+/** Returned by SDK when you create a session. */
+export interface Session {
+  /** Internal id = keyHash felt (same as supplied key or its hash). */
+  id: Felt;
+  /** Public session key felt (simplified for now). */
+  pubkey: Felt;
+  /** Policy you requested. */
+  policy: SessionPolicyInput;
+  /** Created at (ms). */
+  createdAt: number;
+}
+
+/** Sessions manager surface. */
+export interface SessionsManager {
+  /** Create a new session keypair and register policy on-chain (later). */
+  create(policy: SessionPolicyInput): Promise<Session>;
+  /** Revoke (deactivate) a session. */
+  revoke(sessionId: Felt): Promise<void>;
+  /** List locally known sessions. */
+  list(): Promise<Session[]>;
+}
+
+/* ------------------ Transport Abstraction (stub) ------------------ */
+
+/**
+ * Call executor (placeholder for starknet.js Account).
+ * We keep it minimal so unit tests don’t need a node or RPC.
+ */
+export interface CallTransport {
+  /** Encode and "send" a call to a contract (no-op in tests). */
+  invoke(address: Felt, entrypoint: string, calldata: Felt[]): Promise<{ txHash: Felt }>;
 }

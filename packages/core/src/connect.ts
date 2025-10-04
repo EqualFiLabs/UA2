@@ -9,6 +9,7 @@ import { ArgentConnector } from './providers/argent';
 import { BraavosConnector } from './providers/braavos';
 import { CartridgeConnector } from './providers/cartridge';
 import { InjectedConnector } from './providers/injected';
+import { makeSessionsManager } from './sessions';
 
 const ALL_CONNECTORS: Record<string, () => WalletConnector> = {
   argent: () => new ArgentConnector(),
@@ -73,6 +74,7 @@ function mkClient(
     connectorLabel: connector.label,
     account,
     address: account.address,
+    sessions: makeSessionsManager({ account }),
     async disconnect() {
       // No-ops for now; real adapters can tear down sessions if needed.
       return;

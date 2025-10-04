@@ -1,22 +1,31 @@
 {
   "name": "@ua2/core",
   "version": "0.1.0",
+  "private": false,
   "type": "module",
   "main": "dist/index.js",
-  "types": "dist/index.d.ts",
-  "files": [
-    "dist"
-  ],
+  "types": "src/index.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./src/index.ts"
+    }
+  },
+  "sideEffects": false,
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "eslint src tests",
-    "test": "vitest run"
-  },
-  "dependencies": {
-    "tslib": "^2.6.2"
+    "lint": "eslint .",
+    "test": "vitest run --run"
   },
   "devDependencies": {
-    "@types/node": "^20.11.24"
+    "typescript": "^5.5.4",
+    "vitest": "^1.6.0",
+    "@types/node": "^20.11.30",
+    "tslib": "^2.6.2",
+    "eslint": "^8.57.0",
+    "@typescript-eslint/eslint-plugin": "^7.10.0",
+    "@typescript-eslint/parser": "^7.10.0",
+    "eslint-plugin-import": "^2.29.1"
   }
 }

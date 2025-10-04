@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "paths": {
+      "@ua2/core": ["../core/src/index.ts"],
+      "@ua2/core/*": ["../core/src/*"]
+    }
+  },
+  "include": ["src", "tests"]
+}

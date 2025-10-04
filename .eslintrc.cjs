@@ -18,7 +18,11 @@ module.exports = {
   settings: {
     'import/resolver': {
       typescript: {
-        project: ['tsconfig.base.json', 'packages/*/tsconfig.json'],
+        project: [
+          'tsconfig.base.json',
+          'packages/*/tsconfig.json',
+          'packages/*/tsconfig.eslint.json'
+        ],
         alwaysTryTypes: true
       },
       node: {

@@ -68,7 +68,7 @@ class SessionsImpl implements SessionsManager {
   async revoke(sessionId: Felt): Promise<void> {
     // Mark local store only; on-chain call can be plugged via transport later.
     const s = this.sessions.find((x) => x.id === sessionId);
-    if (s) (s.policy as any).active = false;
+    if (s) s.policy = { ...s.policy, active: false };
     // Example (future):
     // await this.transport?.invoke(this.ua2!, 'revoke_session', [sessionId]);
   }

@@ -3,7 +3,8 @@
   "compilerOptions": {
     "rootDir": ".",
     "outDir": "dist",
-    "composite": false
+    "composite": false,
+    "types": ["node"]
   },
   "include": ["src", "tests", "../core/src/**/*.ts"],
   "exclude": ["dist"]

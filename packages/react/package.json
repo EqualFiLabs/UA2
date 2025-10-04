@@ -1,26 +1,41 @@
 {
   "name": "@ua2/react",
   "version": "0.1.0",
+  "private": false,
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
-  "files": [
-    "dist"
-  ],
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "sideEffects": false,
+  "peerDependencies": {
+    "react": "^18 || ^19"
+  },
+  "dependencies": {
+    "@ua2/core": "0.1.0"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "eslint src tests",
+    "lint": "eslint .",
     "test": "vitest run --environment jsdom"
   },
-  "peerDependencies": {
-    "react": "^18.2.0"
-  },
   "devDependencies": {
-    "@testing-library/react": "^14.1.2",
-    "@types/react": "^18.2.69",
-    "@types/react-dom": "^18.2.21",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "typescript": "^5.5.4",
+    "@types/react": "^18.3.4",
+    "@types/react-dom": "^18.3.0",
+    "vitest": "^1.6.0",
+    "@testing-library/react": "^16.0.0",
+    "jsdom": "^24.1.0",
+    "eslint": "^8.57.0",
+    "@typescript-eslint/eslint-plugin": "^7.10.0",
+    "@typescript-eslint/parser": "^7.10.0",
+    "eslint-plugin-import": "^2.29.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
   }
 }

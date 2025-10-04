@@ -51,6 +51,6 @@ describe('Sessions API', () => {
 
     await client.sessions.revoke(s.id);
     const list = await client.sessions.list();
-    expect((list[0].policy as any).active).toBe(false);
+    expect(list[0].policy.active).toBe(false);
   });
 });

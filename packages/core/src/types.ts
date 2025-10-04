@@ -139,6 +139,20 @@ export interface SessionsManager {
 
 /* ------------------ Transport Abstraction (stub) ------------------ */
 
+/** Account call (single) */
+export interface AccountCall {
+  to: Felt;
+  selector: Felt;
+  calldata: Felt[];
+}
+
+/** Batched transaction sent by the account */
+export interface AccountTransaction {
+  calls: AccountCall[];
+  /** Optional gas/maxFee hint in felt hex */
+  maxFee?: Felt;
+}
+
 /**
  * Call executor (placeholder for starknet.js Account).
  * We keep it minimal so unit tests don’t need a node or RPC.
@@ -146,4 +160,30 @@ export interface SessionsManager {
 export interface CallTransport {
   /** Encode and "send" a call to a contract (no-op in tests). */
   invoke(address: Felt, entrypoint: string, calldata: Felt[]): Promise<{ txHash: Felt }>;
+}
+
+/* ------------------ Paymasters ------------------ */
+
+export interface SponsoredTx extends AccountTransaction {
+  /** Extra sponsor-provided data (opaque to UA² account). */
+  sponsorData?: Felt[];
+  /** Optional human-readable sponsor name/tag. */
+  sponsorName?: string;
+}
+
+/** Minimal paymaster interface adapters must implement. */
+export interface Paymaster {
+  readonly name: string;
+  /**
+   * Sponsor a transaction (add metadata, set maxFee, etc.).
+   * Return a SponsoredTx; may be identical to input (noop).
+   */
+  sponsor(tx: AccountTransaction): Promise<SponsoredTx>;
+}
+
+/** Result returned by a sponsored execute path. */
+export interface SponsoredExecuteResult {
+  txHash: Felt;
+  sponsored: boolean;
+  sponsorName?: string;
 }

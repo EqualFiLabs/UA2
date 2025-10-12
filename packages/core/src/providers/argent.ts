@@ -1,5 +1,5 @@
 import type { WalletConnector, UA2AccountLike } from '../types';
-import { getGlobalObject, readBooleanHint, readStringHint } from './hints';
+import { getGlobalObject, readBooleanHint, readStringHint, readTransportHint } from './hints';
 
 /**
  * Argent X connector (minimal). We do a soft probe; real integration
@@ -31,6 +31,9 @@ export class ArgentConnector implements WalletConnector {
       address,
       chainId,
       label: this.label,
+      transport: readTransportHint(opts, '__transport'),
+      ua2Address: readStringHint(opts, '__ua2Address'),
+      entrypoint: readStringHint(opts, '__entrypoint'),
     };
   }
 }

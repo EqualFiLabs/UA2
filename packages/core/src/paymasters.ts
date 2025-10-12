@@ -4,6 +4,7 @@ import type {
   CallTransport,
   Felt,
   Paymaster,
+  PaymasterRunner,
   SponsoredExecuteResult,
   SponsoredTx,
   UA2AccountLike,
@@ -15,7 +16,11 @@ import { toFelt } from './utils/felt';
  * Useful for tests or when you want an opt-in toggle with no sponsor.
  */
 export class NoopPaymaster implements Paymaster {
-  readonly name = 'noop';
+  readonly name: string;
+
+  constructor(name = 'noop') {
+    this.name = name;
+  }
   async sponsor(tx: AccountTransaction): Promise<SponsoredTx> {
     return { ...tx, sponsorName: this.name };
   }
@@ -41,7 +46,7 @@ type WithPaymasterArgs = {
  * Wrap a transport with a paymaster: sponsor the tx and then execute it via the UA² account.
  * Returns a small runner with a single `execute()` method.
  */
-export function withPaymaster(args: WithPaymasterArgs) {
+export function withPaymaster(args: WithPaymasterArgs): PaymasterRunner {
   const entrypoint = args.entrypoint ?? '__execute__';
 
   async function execute(calls: AccountCall[] | AccountCall, maxFee?: Felt): Promise<SponsoredExecuteResult> {
@@ -81,5 +86,15 @@ export function withPaymaster(args: WithPaymasterArgs) {
     };
   }
 
-  return { execute };
+  async function call(
+    to: Felt,
+    selector: Felt,
+    calldata: Felt[] = [],
+    maxFee?: Felt
+  ): Promise<SponsoredExecuteResult> {
+    const callObj: AccountCall = { to, selector, calldata };
+    return execute(callObj, maxFee);
+  }
+
+  return { execute, call, paymaster: args.paymaster };
 }

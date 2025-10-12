@@ -1,8 +1,7 @@
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useUA2 } from './context';
 import {
   NoopPaymaster,
-  withPaymaster,
   type AccountCall,
   type CallTransport,
   type Felt,
@@ -30,30 +29,47 @@ export function useAccount(): {
 /* ------------------ useSessions ------------------ */
 
 export function useSessions(): {
-  list: () => Promise<Session[]>;
+  sessions: Session[];
   create: (policy: SessionPolicyInput) => Promise<Session>;
   revoke: (sessionId: Felt) => Promise<void>;
+  refresh: () => Promise<Session[]>;
   isReady: boolean;
 } {
   const { client, status } = useUA2();
   const isReady = status === 'ready' && Boolean(client);
+  const [sessions, setSessions] = useState<Session[]>([]);
 
-  const list = useCallback(async () => {
+  const refresh = useCallback(async () => {
     ensureClient(client);
-    return client.sessions.list();
+    const next = await client.sessions.list();
+    setSessions(next);
+    return next;
   }, [client]);
 
   const create = useCallback(async (policy: SessionPolicyInput) => {
     ensureClient(client);
-    return client.sessions.create(policy);
+    const created = await client.sessions.create(policy);
+    setSessions((prev) => [...prev, created]);
+    return created;
   }, [client]);
 
   const revoke = useCallback(async (sessionId: Felt) => {
     ensureClient(client);
-    return client.sessions.revoke(sessionId);
+    await client.sessions.revoke(sessionId);
+    setSessions((prev) =>
+      prev.map((s) => (s.id === sessionId ? { ...s, policy: { ...s.policy, active: false } } : s))
+    );
   }, [client]);
 
-  return { list, create, revoke, isReady };
+  useEffect(() => {
+    if (!isReady) {
+      setSessions([]);
+      return;
+    }
+    refresh().catch(() => undefined);
+  }, [isReady, refresh]);
+
+  return { sessions, create, revoke, refresh, isReady };
 }
 
 /* ------------------ usePaymaster ------------------ */
@@ -72,6 +88,7 @@ export function usePaymaster({
   entrypoint,
 }: UsePaymasterArgs): {
   execute: (calls: AccountCall[] | AccountCall, maxFee?: Felt) => Promise<SponsoredExecuteResult>;
+  call: (to: Felt, selector: Felt, calldata?: Felt[], maxFee?: Felt) => Promise<SponsoredExecuteResult>;
   sponsorName: string;
 } {
   const { client } = useUA2();
@@ -80,13 +97,7 @@ export function usePaymaster({
   const paymaster = useMemo(() => providedPaymaster ?? new NoopPaymaster(), [providedPaymaster]);
 
   const runner = useMemo(() => {
-    return withPaymaster({
-      account: client.account,
-      ua2Address,
-      transport,
-      paymaster,
-      entrypoint,
-    });
+    return client.withPaymaster(paymaster, { ua2Address, transport, entrypoint });
   }, [client, ua2Address, transport, paymaster, entrypoint]);
 
   const execute = useCallback(
@@ -94,7 +105,13 @@ export function usePaymaster({
     [runner]
   );
 
-  return { execute, sponsorName: paymaster.name };
+  const call = useCallback(
+    async (to: Felt, selector: Felt, calldata: Felt[] = [], maxFee?: Felt) =>
+      runner.call(to, selector, calldata, maxFee),
+    [runner]
+  );
+
+  return { execute, call, sponsorName: paymaster.name };
 }
 
 /* ------------------ helpers ------------------ */

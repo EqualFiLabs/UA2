@@ -49,18 +49,34 @@ const sess = await ua.sessions.create({
 await ua.sessions.revoke(sess.id);
 ```
 
+### sessions.use(sessionId)
+
+```ts
+const usage = await ua.sessions.use(sess.id);
+usage.ensureAllowed({ to: erc20.address, selector: TRANSFER, calldata: [recipient, amount] });
+```
+
+Throws `SessionExpired` or `PolicyViolation` if the session is inactive, expired, or the call breaks the policy.
+
+### sessions.guard()
+
+```ts
+const policy = UA2.sessions.guard({ maxCalls: 5, expiresInSeconds: 3600 })
+  .targets([erc20.address])
+  .selector(TRANSFER)
+  .maxValue('10000000000000000')
+  .build();
+```
+
 ---
 
 ### withPaymaster(provider)
 
 ```ts
-const pm = UA2.paymasters.from("starknet-react:xyz");
+const pm = UA2.paymasters.from('starknet-react:xyz');
+const runner = ua.withPaymaster(pm, { transport, ua2Address: account.address });
 
-const tx = await ua.withPaymaster(pm).call(
-  contract,
-  "doThing",
-  [arg1, arg2]
-);
+const tx = await runner.call(contract.address, contract.selector('doThing'), [arg1, arg2]);
 ```
 
 ---
@@ -76,13 +92,17 @@ const { account, connect, disconnect } = useAccount();
 ### useSessions()
 
 ```ts
-const { sessions, create, revoke } = useSessions();
+const { sessions, create, revoke, refresh } = useSessions();
 ```
 
 ### usePaymaster()
 
 ```ts
-const { sponsor, status } = usePaymaster("starknet-react:xyz");
+const { execute, call, sponsorName } = usePaymaster({
+  ua2Address: account.address,
+  transport,
+  paymaster: UA2.paymasters.from('cartridge'),
+});
 ```
 
 ---
@@ -101,7 +121,7 @@ export interface Paymaster {
 ### Example: Cartridge Adapter
 
 ```ts
-const pm = UA2.paymasters.from("cartridge");
+const pm = UA2.paymasters.from('cartridge');
 await pm.sponsor(tx);
 ```
 
@@ -111,5 +131,5 @@ await pm.sponsor(tx);
 
 * `UA2Error: ProviderUnavailable`
 * `UA2Error: SessionExpired`
-* `UA2Error: PolicyViolation(selector|target|value)`
+* `UA2Error: PolicyViolation(selector|target|value|calls)`
 * `UA2Error: PaymasterDenied`

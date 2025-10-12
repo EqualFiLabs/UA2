@@ -11,6 +11,12 @@ export interface UA2AccountLike {
   chainId?: Felt;
   /** Optional human name for diagnostics */
   label?: string;
+  /** Optional transport capable of submitting txs for this account. */
+  transport?: CallTransport;
+  /** Optional UA² contract address override when different from account. */
+  ua2Address?: Felt;
+  /** Optional entrypoint used for execution (defaults to '__execute__'). */
+  entrypoint?: string;
 }
 
 /** Connector can detect availability and create an account session. */
@@ -71,6 +77,9 @@ export interface UA2Client {
 
   /** Sessions manager for session keys and policies. */
   sessions: SessionsManager;
+
+  /** Create a paymaster-backed executor bound to this account. */
+  withPaymaster(paymaster: Paymaster, ctx?: PaymasterContext): PaymasterRunner;
 
   /** Disconnect hook (no-op for now, placeholder for future sessions) */
   disconnect(): Promise<void>;
@@ -179,6 +188,18 @@ export interface Paymaster {
    * Return a SponsoredTx; may be identical to input (noop).
    */
   sponsor(tx: AccountTransaction): Promise<SponsoredTx>;
+}
+
+export interface PaymasterContext {
+  transport?: CallTransport;
+  ua2Address?: Felt;
+  entrypoint?: string;
+}
+
+export interface PaymasterRunner {
+  execute(calls: AccountCall[] | AccountCall, maxFee?: Felt): Promise<SponsoredExecuteResult>;
+  call(to: Felt, selector: Felt, calldata?: Felt[], maxFee?: Felt): Promise<SponsoredExecuteResult>;
+  paymaster: Paymaster;
 }
 
 /** Result returned by a sponsored execute path. */

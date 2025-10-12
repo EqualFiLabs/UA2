@@ -1,5 +1,5 @@
 import type { WalletConnector, UA2AccountLike } from '../types';
-import { getGlobalObject, readBooleanHint, readStringHint } from './hints';
+import { getGlobalObject, readBooleanHint, readStringHint, readTransportHint } from './hints';
 
 export class BraavosConnector implements WalletConnector {
   readonly id = 'braavos';
@@ -19,6 +19,9 @@ export class BraavosConnector implements WalletConnector {
       address,
       chainId,
       label: this.label,
+      transport: readTransportHint(opts, '__transport'),
+      ua2Address: readStringHint(opts, '__ua2Address'),
+      entrypoint: readStringHint(opts, '__entrypoint'),
     };
   }
 }

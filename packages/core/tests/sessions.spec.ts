@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { connect } from '../src/connect';
-import { limits } from '../src/sessions';
-import type { ConnectOptions, SessionPolicyInput } from '../src/types';
+import { limits, guard, useSession } from '../src/sessions';
+import type { ConnectOptions, SessionPolicyInput, AccountCall } from '../src/types';
+import { PolicyViolationError, SessionExpiredError } from '../src/errors';
 import { toUint256 } from '../src/utils/u256';
 
 describe('Sessions API', () => {
@@ -52,5 +53,56 @@ describe('Sessions API', () => {
     await client.sessions.revoke(s.id);
     const list = await client.sessions.list();
     expect(list[0].policy.active).toBe(false);
+  });
+
+  it('useSession validates active policy and throws on violations', async () => {
+    const client = await connect(baseOpts);
+
+    const allowedCall: AccountCall = {
+      to: '0xDEAD',
+      selector: '0x1234',
+      calldata: [],
+    };
+
+    const policy = guard({
+      targets: [allowedCall.to],
+      selectors: [allowedCall.selector],
+      maxCalls: 2,
+      expiresInSeconds: 3600,
+    }).build();
+
+    const session = await client.sessions.create(policy);
+    const usage = await useSession(client.sessions, session.id);
+    expect(usage.session.id).toBe(session.id);
+
+    expect(() => usage.ensureAllowed(allowedCall)).not.toThrow();
+    expect(() =>
+      usage.ensureAllowed({ ...allowedCall, to: '0xBEEF' })
+    ).toThrowError(PolicyViolationError);
+
+    await client.sessions.revoke(session.id);
+    await expect(useSession(client.sessions, session.id)).rejects.toBeInstanceOf(SessionExpiredError);
+
+    const expired = await client.sessions.create({
+      expiresAt: Math.floor(Date.now() / 1000) - 1,
+      limits: limits(1, 0),
+      allow: { targets: [], selectors: [] },
+      active: true,
+    });
+
+    await expect(useSession(client.sessions, expired.id)).rejects.toBeInstanceOf(SessionExpiredError);
+  });
+
+  it('guard builder shapes policies with defaults', () => {
+    const policy = guard({ maxValue: '10', expiresInSeconds: 10 })
+      .target('0x1')
+      .selector('0x2')
+      .build();
+
+    expect(policy.allow.targets).toContain('0x1');
+    expect(policy.allow.selectors).toContain('0x2');
+    expect(policy.limits.maxCalls).toBeGreaterThanOrEqual(1);
+    expect(policy.limits.maxValuePerCall[0]).toBeDefined();
+    expect(policy.expiresAt).toBeGreaterThan(Math.floor(Date.now() / 1000));
   });
 });

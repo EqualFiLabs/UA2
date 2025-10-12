@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import type {
+  AccountCall,
   CallTransport,
   Felt,
   Session,
@@ -11,6 +12,7 @@ import type {
 } from './types';
 import { toUint256 } from './utils/u256';
 import { toFelt } from './utils/felt';
+import { PolicyViolationError, SessionExpiredError } from './errors';
 
 /**
  * In-memory session store + deterministic calldata shaping.
@@ -145,6 +147,182 @@ export function limits(maxCalls: number, maxValue: string | number | bigint): {
 } {
   return { maxCalls, maxValuePerCall: toUint256(maxValue) };
 }
+
+/* ------------------ Session helpers ------------------ */
+
+export interface SessionUseOptions {
+  /** Override "now" in milliseconds (defaults to Date.now()). */
+  now?: number;
+}
+
+export interface SessionUsage {
+  session: Session;
+  /** Ensure the provided calls comply with the session policy. */
+  ensureAllowed(calls: AccountCall[] | AccountCall): void;
+}
+
+export async function useSession(
+  manager: SessionsManager,
+  sessionId: Felt,
+  opts?: SessionUseOptions
+): Promise<SessionUsage> {
+  const list = await manager.list();
+  const found = list.find((s) => s.id === sessionId);
+  if (!found) {
+    throw new SessionExpiredError(`Session ${sessionId} not found.`);
+  }
+
+  ensureSessionActive(found, opts?.now);
+
+  return {
+    session: found,
+    ensureAllowed(calls: AccountCall[] | AccountCall) {
+      ensureSessionActive(found, opts?.now);
+      const arr = Array.isArray(calls) ? calls : [calls];
+      ensurePolicy(found, arr);
+    },
+  };
+}
+
+function ensureSessionActive(session: Session, nowMs?: number) {
+  if (session.policy.active === false) {
+    throw new SessionExpiredError(`Session ${session.id} is inactive.`);
+  }
+
+  const nowSeconds = Math.floor((nowMs ?? Date.now()) / 1000);
+  if (session.policy.expiresAt <= nowSeconds) {
+    throw new SessionExpiredError(`Session ${session.id} expired at ${session.policy.expiresAt}.`);
+  }
+}
+
+function ensurePolicy(session: Session, calls: AccountCall[]) {
+  const { allow, limits } = session.policy;
+
+  if (calls.length > limits.maxCalls) {
+    throw new PolicyViolationError('calls', `${calls.length} > ${limits.maxCalls}`);
+  }
+
+  const allowedTargets = new Set((allow.targets ?? []).map((t) => toFelt(t)));
+  const allowedSelectors = new Set((allow.selectors ?? []).map((s) => toFelt(s)));
+
+  for (const call of calls) {
+    if (allowedTargets.size > 0 && !allowedTargets.has(toFelt(call.to))) {
+      throw new PolicyViolationError('target', call.to);
+    }
+
+    if (allowedSelectors.size > 0 && !allowedSelectors.has(toFelt(call.selector))) {
+      throw new PolicyViolationError('selector', call.selector);
+    }
+  }
+}
+
+/* ------------------ Guard builder ------------------ */
+
+export interface GuardBuilderInit {
+  expiresAt?: number;
+  expiresInSeconds?: number;
+  maxCalls?: number;
+  maxValue?: string | number | bigint;
+  targets?: Felt[];
+  selectors?: Felt[];
+  active?: boolean;
+}
+
+export interface GuardBuilder {
+  target(addr: Felt): GuardBuilder;
+  targets(addresses: Iterable<Felt>): GuardBuilder;
+  selector(sel: Felt): GuardBuilder;
+  selectors(values: Iterable<Felt>): GuardBuilder;
+  maxCalls(count: number): GuardBuilder;
+  maxValue(value: string | number | bigint): GuardBuilder;
+  expiresAt(timestamp: number): GuardBuilder;
+  expiresIn(seconds: number): GuardBuilder;
+  active(flag: boolean): GuardBuilder;
+  build(): SessionPolicyInput;
+}
+
+export function guard(init: GuardBuilderInit = {}): GuardBuilder {
+  let expiresAt = resolveExpiry(init);
+  let maxCallsCount = init.maxCalls ?? 1;
+  let maxValueInput: string | number | bigint = init.maxValue ?? 0;
+  let isActive = init.active ?? true;
+  const targets = new Set((init.targets ?? []).map((t) => toFelt(t)));
+  const selectors = new Set((init.selectors ?? []).map((s) => toFelt(s)));
+
+  const builder: GuardBuilder = {
+    target(addr: Felt) {
+      targets.add(toFelt(addr));
+      return builder;
+    },
+    targets(addresses: Iterable<Felt>) {
+      for (const addr of addresses) targets.add(toFelt(addr));
+      return builder;
+    },
+    selector(sel: Felt) {
+      selectors.add(toFelt(sel));
+      return builder;
+    },
+    selectors(values: Iterable<Felt>) {
+      for (const sel of values) selectors.add(toFelt(sel));
+      return builder;
+    },
+    maxCalls(count: number) {
+      maxCallsCount = Math.max(1, Math.floor(count));
+      return builder;
+    },
+    maxValue(value: string | number | bigint) {
+      maxValueInput = value;
+      return builder;
+    },
+    expiresAt(timestamp: number) {
+      expiresAt = Math.max(0, Math.floor(timestamp));
+      return builder;
+    },
+    expiresIn(seconds: number) {
+      const now = Math.floor(Date.now() / 1000);
+      expiresAt = now + Math.max(0, Math.floor(seconds));
+      return builder;
+    },
+    active(flag: boolean) {
+      isActive = flag;
+      return builder;
+    },
+    build(): SessionPolicyInput {
+      return {
+        expiresAt,
+        limits: {
+          maxCalls: maxCallsCount,
+          maxValuePerCall: toUint256(maxValueInput),
+        },
+        allow: {
+          targets: Array.from(targets),
+          selectors: Array.from(selectors),
+        },
+        active: isActive,
+      };
+    },
+  };
+
+  return builder;
+}
+
+function resolveExpiry(init: GuardBuilderInit): number {
+  if (typeof init.expiresAt === 'number') {
+    return Math.max(0, Math.floor(init.expiresAt));
+  }
+  if (typeof init.expiresInSeconds === 'number') {
+    const now = Math.floor(Date.now() / 1000);
+    return now + Math.max(0, Math.floor(init.expiresInSeconds));
+  }
+  const defaultExpirySeconds = Math.floor(Date.now() / 1000) + 3600; // 1 hour default
+  return defaultExpirySeconds;
+}
+
+export const sessions = {
+  use: useSession,
+  guard,
+  limits,
+};
 
 /* ------------------ Key generation (dev-only) ------------------ */
 

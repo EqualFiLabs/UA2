@@ -191,7 +191,7 @@ Script: `packages/example/scripts/e2e-sepolia.ts`
 
 **Prereqs:**
 
-* `.env.sepolia` filled with RPC + deployed addresses.
+* `.env.sepolia` (copied from `.env.sepolia.example`) filled with RPC + deployed addresses.
 * Wallet funded on Sepolia.
 
 **Flow:**

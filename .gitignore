@@ -3,6 +3,9 @@ dist/
 coverage/
 .env
 .env.*
+!.env.example
+!.env.sepolia.example
+!packages/contracts/scripts/.env.sepolia.example
 target/
 scarb.lock
 .snfoundry_cache/

@@ -42,7 +42,14 @@ npm run bootstrap || true
 
 ## 2) Environment files
 
-Create the following env files:
+Copy the provided templates and then adjust the values:
+
+```bash
+cp .env.example .env
+cp .env.sepolia.example .env.sepolia
+```
+
+Populate them as follows:
 
 **`./.env`** (local devnet defaults)
 
@@ -54,8 +61,14 @@ NODE_ENV=development
 STARKNET_RPC_URL=http://127.0.0.1:5050
 STARKNET_NETWORK=devnet
 
+# UA² contracts (fill after local deploys)
+UA2_CLASS_HASH=
+UA2_IMPLEMENTATION_ADDR=
+UA2_PROXY_ADDR=
+
 # Demo app
 NEXT_PUBLIC_NETWORK=devnet
+NEXT_PUBLIC_UA2_PROXY_ADDR=
 ```
 
 **`./.env.sepolia`** (testnet)
@@ -184,7 +197,7 @@ UA2_PROXY_ADDR=0x...
 NEXT_PUBLIC_UA2_PROXY_ADDR=0x...
 ```
 
-Commit env (without secrets) or keep local.
+Commit env (without secrets) or keep local. The `.env.sepolia.example` template matches these keys.
 
 ---
 

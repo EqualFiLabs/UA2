@@ -54,11 +54,15 @@ scarb build
 ### 3. Deploy to Sepolia
 
 ```bash
-sncast --profile sepolia declare --contract target/dev/UA2Account.sierra.json
-sncast --profile sepolia run scripts/deploy_ua2_proxy --calldata <OWNER_PUBKEY>
+# still inside packages/contracts
+export STARKNET_RPC_URL=<YOUR_SEPOLIA_RPC>
+export UA2_OWNER_PUBKEY=<OWNER_PUBKEY_FELT>
+./scripts/deploy_ua2.sh
 ```
 
-Fill `UA2_CLASS_HASH` and `UA2_PROXY_ADDR` into `.env.sepolia`.
+The helper script declares the class if needed and writes `UA2_CLASS_HASH`, `UA2_IMPLEMENTATION_ADDR`,
+and `UA2_PROXY_ADDR` to `packages/contracts/.ua2-sepolia-addresses.json`. Copy the relevant values into
+`.env.sepolia` (and `NEXT_PUBLIC_UA2_PROXY_ADDR` for the demo app).
 
 ### 4. Run demo app
 

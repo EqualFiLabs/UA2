@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { connect } from '../src/connect';
-import { limits, guard, useSession } from '../src/sessions';
+import { limits, guard, useSession, makeSessionsManager } from '../src/sessions';
 import type { ConnectOptions, SessionPolicyInput, AccountCall } from '../src/types';
 import { PolicyViolationError, SessionExpiredError } from '../src/errors';
 import { toUint256 } from '../src/utils/u256';
@@ -38,6 +38,54 @@ describe('Sessions API', () => {
     const list = await client.sessions.list();
     expect(list.length).toBe(1);
     expect(list[0].id).toBe(session.id);
+  });
+
+  it('encodes allowlist calldata when transport is available', async () => {
+    const sent: { addr: string; entry: string; data: string[] }[] = [];
+    const transport = {
+      async invoke(addr: string, entry: string, data: string[]) {
+        sent.push({ addr, entry, data: [...data] });
+        return { txHash: '0x777' as const };
+      },
+    };
+
+    const manager = makeSessionsManager({
+      account: { address: '0xACC', chainId: '0xSEPOLIA', label: 'test' },
+      transport,
+      ua2Address: '0xacc0',
+    });
+
+    const policy: SessionPolicyInput = {
+      expiresAt: 1_888_888_888,
+      limits: limits(3, '0x10'),
+      allow: {
+        targets: ['0xDEAD', '0xBEEF'],
+        selectors: ['0xCAFE'],
+      },
+      active: true,
+    };
+
+    await manager.create(policy);
+
+    expect(sent.length).toBe(1);
+    const call = sent[0];
+    expect(call.addr).toBe('0xacc0');
+    expect(call.entry).toBe('add_session_with_allowlists');
+
+    const data = call.data;
+    expect(data[0]).toBe(data[1]);
+    expect(data.slice(2, 8)).toEqual([
+      '0x1',
+      '0x70962838',
+      '0x3',
+      '0x0',
+      '0x10',
+      '0x0',
+    ]);
+    expect(data[8]).toBe('0x2');
+    expect(data.slice(9, 11)).toEqual(['0xdead', '0xbeef']);
+    expect(data[11]).toBe('0x1');
+    expect(data[12]).toBe('0xcafe');
   });
 
   it('revokes a session locally (active=false)', async () => {

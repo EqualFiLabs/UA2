@@ -84,6 +84,25 @@ describe('paymasters', () => {
     expect(last.data.slice(-3)).toEqual(['0x2', '0xcafe', '0xbeef']);
   });
 
+  it('propagates sponsor rejections with documented error', async () => {
+    const { transport, sent } = mkFakeTransport();
+    const expected = new PaymasterDeniedError('sponsor offline');
+
+    const failing: Paymaster = {
+      name: 'fail',
+      async sponsor(): Promise<SponsoredTx> {
+        throw expected;
+      },
+    };
+
+    const runner = withPaymaster({ account, ua2Address, transport, paymaster: failing });
+
+    await expect(
+      runner.execute({ to: '0x1', selector: '0x2', calldata: [] })
+    ).rejects.toBe(expected);
+    expect(sent.length).toBe(0);
+  });
+
   it('paymaster factory returns adapters and errors for unknown ids', async () => {
     const noop = paymasterFrom('noop:test');
     const sponsored = await noop.sponsor({ calls: [], maxFee: undefined });

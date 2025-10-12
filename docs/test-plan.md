@@ -135,15 +135,18 @@ All tests passed.
 
 ```bash
 npm run test:unit
+# Coverage across workspaces
+npm run test:coverage
 ```
 
-Expected:
+Expected (coverage run):
 
 ```
-core: 52 passed
-paymasters: 14 passed
-react: 6 passed
-All tests passed (###ms)
+core: 16 passed (≈92% statements covered)
+example: 1 passed (App integration)
+paymasters: 1 passed (100% coverage)
+react: 2 passed (≈76% statements covered)
+All tests passed
 ```
 
 ---

@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
 import {
   UA2Provider,
   useUA2,
@@ -35,6 +35,18 @@ type GuardianControlsProps = {
   client: UA2Client;
 };
 
+const cardClass = 'card';
+const sectionTitleClass = 'section-title';
+const sectionDescriptionClass = 'section-description';
+const labelClass = 'form-label';
+const inputClass = 'form-input';
+const textareaClass = 'form-textarea';
+const selectClass = 'form-select';
+const checkboxClass = 'form-checkbox';
+const primaryButtonClass = 'button button-primary';
+const secondaryButtonClass = 'button button-secondary';
+const pillClass = 'pill';
+
 function parsePreferred(input: string): string[] {
   return input
     .split(',')
@@ -55,16 +67,31 @@ function StatusCard(): JSX.Element {
   const { status, error, client } = useUA2();
   const address = client?.address;
 
+  const statusTone =
+    status === 'ready'
+      ? 'pill--ready'
+      : status === 'connecting'
+        ? 'pill--connecting'
+        : 'pill--idle';
+
   return (
-    <section style={cardStyle} aria-live="polite">
-      <h2>UA² Status</h2>
-      <p>Connection state: {status}</p>
-      {address ? <p>Connected address: {address}</p> : null}
-      {error ? (
-        <p role="alert" style={{ color: 'crimson' }}>
-          Last error: {error.message}
-        </p>
-      ) : null}
+    <section className={`${cardClass} stack stack-xl`} aria-live="polite">
+      <div className="status-header">
+        <h2 className={sectionTitleClass}>UA² Status</h2>
+        <span className={`${pillClass} ${statusTone}`}>{status}</span>
+      </div>
+      <div className="stack stack-sm text-small text-muted">
+        {address ? (
+          <p className="text-success text-medium">Connected address: {address}</p>
+        ) : (
+          <p>Connect a wallet to explore the session playground.</p>
+        )}
+        {error ? (
+          <p role="alert" className="text-small text-strong text-error">
+            Last error: {error.message}
+          </p>
+        ) : null}
+      </div>
     </section>
   );
 }
@@ -81,8 +108,8 @@ function ConnectPanel(): JSX.Element {
         },
       },
       null,
-      2
-    )
+      2,
+    ),
   );
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
@@ -129,72 +156,68 @@ function ConnectPanel(): JSX.Element {
   }
 
   return (
-    <section style={cardStyle}>
-      <h2>Wallet connection</h2>
-      <p>
-        Provide connector preferences and optional hints. The example defaults to the injected connector
-        and marks it as available so tests and scripted demos can inject custom transports.
-      </p>
-      <form onSubmit={handleConnect}>
-        <div style={fieldStyle}>
-          <label htmlFor="preferred-connectors">Preferred connectors (comma separated)</label>
-          <input
-            id="preferred-connectors"
-            value={preferred}
-            onChange={(event) => setPreferred(event.target.value)}
-            placeholder="injected,argent"
-          />
+    <section className={`${cardClass} stack stack-xxl`}>
+      <div>
+        <h2 className={sectionTitleClass}>Wallet connection</h2>
+        <p className={sectionDescriptionClass}>
+          Provide connector preferences and optional hints. The playground defaults to the injected connector and
+          marks it as available so scripted demos can wire up custom transports.
+        </p>
+      </div>
+      <form className="stack stack-xxl" onSubmit={handleConnect}>
+        <div className="stack stack-lg">
+          <div className="stack stack-sm">
+            <label className={labelClass} htmlFor="preferred-connectors">
+              Preferred connectors (comma separated)
+            </label>
+            <input
+              className={inputClass}
+              id="preferred-connectors"
+              value={preferred}
+              onChange={(event) => setPreferred(event.target.value)}
+              placeholder="injected,argent"
+            />
+          </div>
+          <div className="stack stack-sm">
+            <label className={labelClass} htmlFor="hints-json">
+              Connector hints (JSON)
+            </label>
+            <textarea
+              className={textareaClass}
+              id="hints-json"
+              value={hintsText}
+              onChange={(event) => setHintsText(event.target.value)}
+            />
+            {hintError ? (
+              <p role="alert" className="text-small text-medium text-error">
+                {hintError}
+              </p>
+            ) : null}
+          </div>
         </div>
-        <div style={fieldStyle}>
-          <label htmlFor="hints-json">Connector hints (JSON)</label>
-          <textarea
-            id="hints-json"
-            value={hintsText}
-            onChange={(event) => setHintsText(event.target.value)}
-            rows={6}
-          />
-          {hintError ? (
-            <p role="alert" style={{ color: 'crimson' }}>
-              {hintError}
-            </p>
-          ) : null}
-        </div>
-        <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
+        <label className="checkbox-row">
           <input
+            className={checkboxClass}
             type="checkbox"
             checked={fallback}
             onChange={(event) => setFallback(event.target.checked)}
           />
           Allow fallback to any available connector
         </label>
-        <div style={{ marginTop: '1rem', display: 'flex', gap: '0.5rem' }}>
-          <button type="submit" disabled={busy || status === 'connecting'}>
+        <div className="button-group">
+          <button className={primaryButtonClass} type="submit" disabled={busy || status === 'connecting'}>
             {busy && status !== 'ready' ? 'Connecting…' : 'Connect'}
           </button>
-          <button type="button" onClick={handleDisconnect} disabled={busy || !client}>
+          <button className={secondaryButtonClass} type="button" onClick={handleDisconnect} disabled={busy || !client}>
             Disconnect
           </button>
         </div>
       </form>
-      {feedback ? <p aria-live="polite">{feedback}</p> : null}
-    </section>
-  );
-}
-
-function SessionWorkspace({ client }: SessionWorkspaceProps): JSX.Element {
-  const { sessions, create, revoke, refresh, isReady } = useSessions();
-
-  return (
-    <section style={cardStyle}>
-      <h2>Sessions</h2>
-      <p>
-        Create short-lived session keys and apply usage to test policy limits. These controls mirror the
-        E2E scripts so you can exercise the happy path, policy violations, and revocation flows from the
-        browser.
-      </p>
-      <SessionCreateForm create={create} isReady={isReady} />
-      <SessionList sessions={sessions} revoke={revoke} refresh={refresh} client={client} />
-      <SessionUsagePanel sessions={sessions} client={client} />
+      {feedback ? (
+        <p aria-live="polite" className="text-small text-medium text-success">
+          {feedback}
+        </p>
+      ) : null}
     </section>
   );
 }
@@ -251,47 +274,75 @@ function SessionCreateForm({ create, isReady }: SessionCreateFormProps): JSX.Ele
   }
 
   return (
-    <form onSubmit={handleSubmit} style={{ marginBottom: '1.5rem', borderBottom: '1px solid #ddd', paddingBottom: '1rem' }}>
-      <h3>Create session</h3>
-      <div style={gridStyle}>
-        <label htmlFor="session-target">Allowed target (felt hex)</label>
-        <input
-          id="session-target"
-          value={target}
-          onChange={(event) => setTarget(event.target.value)}
-          placeholder="0x..."
-        />
-        <label htmlFor="session-selector">Allowed selector (felt hex)</label>
-        <input
-          id="session-selector"
-          value={selector}
-          onChange={(event) => setSelector(event.target.value)}
-          placeholder="0x..."
-        />
-        <label htmlFor="session-max-calls">Max calls</label>
-        <input
-          id="session-max-calls"
-          type="number"
-          min={1}
-          value={maxCalls}
-          onChange={(event) => setMaxCalls(event.target.value)}
-        />
-        <label htmlFor="session-max-value">Max value per call (wei)</label>
-        <input
-          id="session-max-value"
-          value={maxValue}
-          onChange={(event) => setMaxValue(event.target.value)}
-        />
-        <label htmlFor="session-expiry">Expires in (minutes)</label>
-        <input
-          id="session-expiry"
-          type="number"
-          min={1}
-          value={expiresMinutes}
-          onChange={(event) => setExpiresMinutes(event.target.value)}
-        />
-        <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
+    <form className="stack stack-xxl section-divider" onSubmit={handleSubmit}>
+      <div>
+        <h3 className="section-heading">Create session</h3>
+      </div>
+      <div className="form-grid">
+        <div className="stack stack-sm">
+          <label className={labelClass} htmlFor="session-target">
+            Allowed target (felt hex)
+          </label>
           <input
+            className={inputClass}
+            id="session-target"
+            value={target}
+            onChange={(event) => setTarget(event.target.value)}
+            placeholder="0x..."
+          />
+        </div>
+        <div className="stack stack-sm">
+          <label className={labelClass} htmlFor="session-selector">
+            Allowed selector (felt hex)
+          </label>
+          <input
+            className={inputClass}
+            id="session-selector"
+            value={selector}
+            onChange={(event) => setSelector(event.target.value)}
+            placeholder="0x..."
+          />
+        </div>
+        <div className="stack stack-sm">
+          <label className={labelClass} htmlFor="session-max-calls">
+            Max calls
+          </label>
+          <input
+            className={inputClass}
+            id="session-max-calls"
+            type="number"
+            min={1}
+            value={maxCalls}
+            onChange={(event) => setMaxCalls(event.target.value)}
+          />
+        </div>
+        <div className="stack stack-sm">
+          <label className={labelClass} htmlFor="session-max-value">
+            Max value per call (wei)
+          </label>
+          <input
+            className={inputClass}
+            id="session-max-value"
+            value={maxValue}
+            onChange={(event) => setMaxValue(event.target.value)}
+          />
+        </div>
+        <div className="stack stack-sm">
+          <label className={labelClass} htmlFor="session-expiry">
+            Expires in (minutes)
+          </label>
+          <input
+            className={inputClass}
+            id="session-expiry"
+            type="number"
+            min={1}
+            value={expiresMinutes}
+            onChange={(event) => setExpiresMinutes(event.target.value)}
+          />
+        </div>
+        <label className="checkbox-row">
+          <input
+            className={checkboxClass}
             type="checkbox"
             checked={active}
             onChange={(event) => setActive(event.target.checked)}
@@ -299,12 +350,16 @@ function SessionCreateForm({ create, isReady }: SessionCreateFormProps): JSX.Ele
           Start active
         </label>
       </div>
-      <button type="submit" disabled={!isReady || busy}>
+      <button className={primaryButtonClass} type="submit" disabled={!isReady || busy}>
         {busy ? 'Creating…' : 'Create session'}
       </button>
-      {message ? <p aria-live="polite">{message}</p> : null}
+      {message ? (
+        <p aria-live="polite" className="text-small text-medium text-success">
+          {message}
+        </p>
+      ) : null}
       {error ? (
-        <p role="alert" style={{ color: 'crimson' }}>
+        <p role="alert" className="text-small text-strong text-error">
           {error}
         </p>
       ) : null}
@@ -350,33 +405,36 @@ function SessionList({ sessions, revoke, refresh, client }: SessionListProps): J
   }
 
   return (
-    <div style={{ marginBottom: '1.5rem' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h3 style={{ margin: 0 }}>Known sessions</h3>
-        <button type="button" onClick={handleRefresh}>
+    <div className="stack stack-lg">
+      <div className="section-header">
+        <h3 className="section-heading">Known sessions</h3>
+        <button className={secondaryButtonClass} type="button" onClick={handleRefresh}>
           Refresh
         </button>
       </div>
       {sessions.length === 0 ? (
-        <p>No sessions created yet.</p>
+        <p className="text-small text-muted">No sessions created yet.</p>
       ) : (
-        <ul>
+        <ul className="stack stack-md">
           {sessions.map((session) => (
-            <li key={session.id} style={{ marginBottom: '0.75rem' }}>
-              <div>
-                <strong>{session.id}</strong>
-                <span style={{ marginLeft: '0.5rem' }}>
+            <li
+              key={session.id}
+              className="session-item"
+            >
+              <div className="session-item__header">
+                <strong className="text-success text-strong">{session.id}</strong>
+                <span className="meta-text">
                   status: {session.policy.active === false ? 'inactive' : 'active'}
                 </span>
               </div>
-              <div style={{ fontSize: '0.9rem' }}>
+              <div className="session-note">
                 Expires at: {session.policy.expiresAt} · Max calls: {session.policy.limits.maxCalls}
               </div>
               <button
+                className={`${secondaryButtonClass} session-item__action`}
                 type="button"
                 onClick={() => void handleRevoke(session)}
                 disabled={busyId === session.id}
-                style={{ marginTop: '0.5rem' }}
               >
                 {busyId === session.id ? 'Revoking…' : 'Revoke session'}
               </button>
@@ -384,9 +442,13 @@ function SessionList({ sessions, revoke, refresh, client }: SessionListProps): J
           ))}
         </ul>
       )}
-      {message ? <p aria-live="polite">{message}</p> : null}
+      {message ? (
+        <p aria-live="polite" className="text-small text-medium text-success">
+          {message}
+        </p>
+      ) : null}
       {error ? (
-        <p role="alert" style={{ color: 'crimson' }}>
+        <p role="alert" className="text-small text-strong text-error">
           {error}
         </p>
       ) : null}
@@ -433,12 +495,7 @@ function SessionUsagePanel({ sessions, client }: SessionUsagePanelProps): JSX.El
       const used = BigInt(callsUsed || '0');
       const delta = BigInt(callsToUse || '0');
       const nonceValue = BigInt(nonce || '0');
-      const calldata = [
-        sessionId,
-        toFelt(used),
-        toFelt(delta),
-        toFelt(nonceValue),
-      ];
+      const calldata = [sessionId, toFelt(used), toFelt(delta), toFelt(nonceValue)];
       const result = await transport.invoke(ua2Address, 'apply_session_usage', calldata);
       setMessage(`Usage applied. Tx hash: ${result.txHash}`);
       setCallsUsed((prev) => (BigInt(prev || '0') + delta).toString());
@@ -452,68 +509,111 @@ function SessionUsagePanel({ sessions, client }: SessionUsagePanelProps): JSX.El
 
   if (sessions.length === 0) {
     return (
-      <section>
-        <h3>Apply usage</h3>
-        <p>Create a session to enable usage tracking.</p>
+      <section className="empty-state">
+        <h3 className="section-subheading">Apply usage</h3>
+        <p className="spacer-sm">Create a session to enable usage tracking.</p>
       </section>
     );
   }
 
   return (
-    <section>
-      <h3>Apply usage</h3>
-      <form onSubmit={handleApply}>
-        <div style={gridStyle}>
-          <label htmlFor="usage-session">Session</label>
-          <select
-            id="usage-session"
-            value={sessionId}
-            onChange={(event) => setSessionId(event.target.value)}
-          >
-            <option value="" disabled>
-              Select session
-            </option>
-            {sessions.map((session) => (
-              <option key={session.id} value={session.id}>
-                {session.id}
+    <section className="stack stack-xl">
+      <h3 className="section-heading">Apply usage</h3>
+      <form className="stack stack-xxl" onSubmit={handleApply}>
+        <div className="form-grid">
+          <div className="stack stack-sm">
+            <label className={labelClass} htmlFor="usage-session">
+              Session
+            </label>
+            <select
+              className={selectClass}
+              id="usage-session"
+              value={sessionId}
+              onChange={(event) => setSessionId(event.target.value)}
+            >
+              <option value="" disabled>
+                Select session
               </option>
-            ))}
-          </select>
-          <label htmlFor="usage-used">Calls used</label>
-          <input
-            id="usage-used"
-            type="number"
-            min={0}
-            value={callsUsed}
-            onChange={(event) => setCallsUsed(event.target.value)}
-          />
-          <label htmlFor="usage-delta">Calls to apply</label>
-          <input
-            id="usage-delta"
-            type="number"
-            min={0}
-            value={callsToUse}
-            onChange={(event) => setCallsToUse(event.target.value)}
-          />
-          <label htmlFor="usage-nonce">Nonce</label>
-          <input
-            id="usage-nonce"
-            type="number"
-            min={0}
-            value={nonce}
-            onChange={(event) => setNonce(event.target.value)}
-          />
+              {sessions.map((session) => (
+                <option key={session.id} value={session.id}>
+                  {session.id}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="stack stack-sm">
+            <label className={labelClass} htmlFor="usage-used">
+              Calls used
+            </label>
+            <input
+              className={inputClass}
+              id="usage-used"
+              type="number"
+              min={0}
+              value={callsUsed}
+              onChange={(event) => setCallsUsed(event.target.value)}
+            />
+          </div>
+          <div className="stack stack-sm">
+            <label className={labelClass} htmlFor="usage-delta">
+              Calls to apply
+            </label>
+            <input
+              className={inputClass}
+              id="usage-delta"
+              type="number"
+              min={0}
+              value={callsToUse}
+              onChange={(event) => setCallsToUse(event.target.value)}
+            />
+          </div>
+          <div className="stack stack-sm">
+            <label className={labelClass} htmlFor="usage-nonce">
+              Nonce
+            </label>
+            <input
+              className={inputClass}
+              id="usage-nonce"
+              type="number"
+              min={0}
+              value={nonce}
+              onChange={(event) => setNonce(event.target.value)}
+            />
+          </div>
         </div>
-        <button type="submit" disabled={busy}>
+        <button className={primaryButtonClass} type="submit" disabled={busy}>
           {busy ? 'Submitting…' : 'Apply session usage'}
         </button>
       </form>
-      {message ? <p aria-live="polite">{message}</p> : null}
+      {message ? (
+        <p aria-live="polite" className="text-small text-medium text-success">
+          {message}
+        </p>
+      ) : null}
       {error ? (
-        <p role="alert" style={{ color: 'crimson' }}>
+        <p role="alert" className="text-small text-strong text-error">
           {error}
         </p>
       ) : null}
+    </section>
+  );
+}
+
+function SessionWorkspace({ client }: SessionWorkspaceProps): JSX.Element {
+  const { sessions, create, revoke, refresh, isReady } = useSessions();
+
+  return (
+    <section className={`${cardClass} stack stack-xxxl span-two`}>
+      <div>
+        <h2 className={sectionTitleClass}>Sessions</h2>
+        <p className={sectionDescriptionClass}>
+          Create short-lived session keys and apply usage to test policy limits. These controls mirror the E2E scripts so you
+          can exercise the happy path, policy violations, and revocation flows directly from the browser.
+        </p>
+      </div>
+      <SessionCreateForm create={create} isReady={isReady} />
+      <SessionList sessions={sessions} revoke={revoke} refresh={refresh} client={client} />
+      <SessionUsagePanel sessions={sessions} client={client} />
     </section>
   );
 }
@@ -574,9 +674,7 @@ function PaymasterControls({ client }: PaymasterControlsProps): JSX.Element {
         const maxFeeFelt = maxFee.trim() ? toFelt(maxFee.trim()) : undefined;
         const result = await paymasterRunner.execute(call, maxFeeFelt);
         setMessage(
-          `Sponsored execute via ${result.sponsorName ?? paymaster.name}. Tx hash: ${result.txHash}. Sponsored: ${
-            result.sponsored ? 'yes' : 'no'
-          }`
+          `Sponsored execute via ${result.sponsorName ?? paymaster.name}. Tx hash: ${result.txHash}. Sponsored: ${result.sponsored ? 'yes' : 'no'}`,
         );
       } else {
         const flattened: Felt[] = [
@@ -599,68 +697,95 @@ function PaymasterControls({ client }: PaymasterControlsProps): JSX.Element {
 
   if (!transport) {
     return (
-      <section style={cardStyle}>
-        <h2>Paymaster execution</h2>
-        <p>Your connector must expose a transport to demonstrate sponsored calls.</p>
+      <section className={`${cardClass} stack stack-lg`}>
+        <h2 className={sectionTitleClass}>Paymaster execution</h2>
+        <p className={sectionDescriptionClass}>
+          Your connector must expose a transport to demonstrate sponsored calls.
+        </p>
       </section>
     );
   }
 
   return (
-    <section style={cardStyle}>
-      <h2>Paymaster execution</h2>
-      <p>
-        Toggle between direct execution and sponsored calls. Sponsored mode uses the UA² paymaster runner
-        and reports sponsor metadata from the configured adapter.
-      </p>
-      <form onSubmit={handleSubmit}>
-        <div style={gridStyle}>
-          <label htmlFor="paymaster-to">Target contract</label>
-          <input
-            id="paymaster-to"
-            value={contractAddress}
-            onChange={(event) => setContractAddress(event.target.value)}
-            placeholder="0x..."
-          />
-          <label htmlFor="paymaster-selector">Selector</label>
-          <input
-            id="paymaster-selector"
-            value={selector}
-            onChange={(event) => setSelector(event.target.value)}
-            placeholder="0x..."
-          />
-          <label htmlFor="paymaster-calldata">Calldata (comma separated)</label>
-          <input
-            id="paymaster-calldata"
-            value={calldata}
-            onChange={(event) => setCalldata(event.target.value)}
-            placeholder="0x1,0x2"
-          />
-          <label htmlFor="paymaster-maxfee">Max fee (optional)</label>
-          <input
-            id="paymaster-maxfee"
-            value={maxFee}
-            onChange={(event) => setMaxFee(event.target.value)}
-            placeholder="0x0"
-          />
+    <section className={`${cardClass} stack stack-xxl`}>
+      <div>
+        <h2 className={sectionTitleClass}>Paymaster execution</h2>
+        <p className={sectionDescriptionClass}>
+          Toggle between direct execution and sponsored calls. Sponsored mode uses the UA² paymaster runner and reports sponsor
+          metadata from the configured adapter.
+        </p>
+      </div>
+      <form className="stack stack-xxl" onSubmit={handleSubmit}>
+        <div className="form-grid">
+          <div className="stack stack-sm">
+            <label className={labelClass} htmlFor="paymaster-to">
+              Target contract
+            </label>
+            <input
+              className={inputClass}
+              id="paymaster-to"
+              value={contractAddress}
+              onChange={(event) => setContractAddress(event.target.value)}
+              placeholder="0x..."
+            />
+          </div>
+          <div className="stack stack-sm">
+            <label className={labelClass} htmlFor="paymaster-selector">
+              Selector
+            </label>
+            <input
+              className={inputClass}
+              id="paymaster-selector"
+              value={selector}
+              onChange={(event) => setSelector(event.target.value)}
+              placeholder="0x..."
+            />
+          </div>
+          <div className="stack stack-sm">
+            <label className={labelClass} htmlFor="paymaster-calldata">
+              Calldata (comma separated)
+            </label>
+            <input
+              className={inputClass}
+              id="paymaster-calldata"
+              value={calldata}
+              onChange={(event) => setCalldata(event.target.value)}
+              placeholder="0x1,0x2"
+            />
+          </div>
+          <div className="stack stack-sm">
+            <label className={labelClass} htmlFor="paymaster-maxfee">
+              Max fee (optional)
+            </label>
+            <input
+              className={inputClass}
+              id="paymaster-maxfee"
+              value={maxFee}
+              onChange={(event) => setMaxFee(event.target.value)}
+              placeholder="0x0"
+            />
+          </div>
         </div>
-        <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.5rem' }}>
+        <label className="checkbox-row">
           <input
+            className={checkboxClass}
             type="checkbox"
             checked={useSponsor}
             onChange={(event) => setUseSponsor(event.target.checked)}
           />
           Use paymaster sponsorship
         </label>
-        <div style={{ marginTop: '1rem' }}>
-          <button type="submit" disabled={busy}>
-            {busy ? 'Submitting…' : 'Execute call'}
-          </button>
-        </div>
+        <button className={primaryButtonClass} type="submit" disabled={busy}>
+          {busy ? 'Submitting…' : 'Execute call'}
+        </button>
       </form>
-      {message ? <p aria-live="polite">{message}</p> : null}
+      {message ? (
+        <p aria-live="polite" className="text-small text-medium text-success">
+          {message}
+        </p>
+      ) : null}
       {error ? (
-        <p role="alert" style={{ color: 'crimson' }}>
+        <p role="alert" className="text-small text-strong text-error">
           {error}
         </p>
       ) : null}
@@ -686,7 +811,9 @@ function GuardianControls({ client }: GuardianControlsProps): JSX.Element {
     await transport.invoke(ua2Address, entrypoint, calldata);
   }
 
-  async function handleAction(action: 'add' | 'remove' | 'threshold' | 'delay' | 'propose' | 'confirm' | 'execute' | 'rotate') {
+  async function handleAction(
+    action: 'add' | 'remove' | 'threshold' | 'delay' | 'propose' | 'confirm' | 'execute' | 'rotate',
+  ) {
     setBusy(true);
     setMessage(null);
     setError(null);
@@ -706,26 +833,24 @@ function GuardianControls({ client }: GuardianControlsProps): JSX.Element {
           await invoke('remove_guardian', [toFelt(guardianAddress.trim())]);
           setMessage('Guardian removed.');
           break;
-        case 'threshold':
-          {
-            const numericThreshold = Number(threshold);
-            if (!Number.isFinite(numericThreshold) || numericThreshold <= 0) {
-              throw new Error('Guardian threshold must be a positive number.');
-            }
-            await invoke('set_guardian_threshold', [toFelt(numericThreshold)]);
+        case 'threshold': {
+          const numericThreshold = Number(threshold);
+          if (!Number.isFinite(numericThreshold) || numericThreshold <= 0) {
+            throw new Error('Guardian threshold must be a positive number.');
           }
+          await invoke('set_guardian_threshold', [toFelt(numericThreshold)]);
           setMessage('Guardian threshold updated.');
           break;
-        case 'delay':
-          {
-            const numericDelay = Number(recoveryDelay);
-            if (!Number.isFinite(numericDelay) || numericDelay < 0) {
-              throw new Error('Recovery delay must be zero or positive.');
-            }
-            await invoke('set_recovery_delay', [toFelt(numericDelay)]);
+        }
+        case 'delay': {
+          const numericDelay = Number(recoveryDelay);
+          if (!Number.isFinite(numericDelay) || numericDelay < 0) {
+            throw new Error('Recovery delay must be zero or positive.');
           }
+          await invoke('set_recovery_delay', [toFelt(numericDelay)]);
           setMessage('Recovery delay updated.');
           break;
+        }
         case 'propose':
           if (!recoveryTarget.trim()) {
             throw new Error('Recovery target is required.');
@@ -761,81 +886,109 @@ function GuardianControls({ client }: GuardianControlsProps): JSX.Element {
 
   if (!transport) {
     return (
-      <section style={cardStyle}>
-        <h2>Guardian recovery</h2>
-        <p>Your connector must supply a transport to drive guardian recovery flows.</p>
+      <section className={`${cardClass} stack stack-lg`}>
+        <h2 className={sectionTitleClass}>Guardian recovery</h2>
+        <p className={sectionDescriptionClass}>
+          Your connector must supply a transport to drive guardian recovery flows.
+        </p>
       </section>
     );
   }
 
   return (
-    <section style={cardStyle}>
-      <h2>Guardian recovery</h2>
-      <p>
-        Manage guardians, thresholds, and execute recovery steps. This mirrors the E2E workflow that adds a
-        guardian, sets the delay/threshold, proposes recovery, and executes it before rotating the owner back.
-      </p>
-      <div style={gridStyle}>
-        <label htmlFor="guardian-address">Guardian address</label>
-        <input
-          id="guardian-address"
-          value={guardianAddress}
-          onChange={(event) => setGuardianAddress(event.target.value)}
-          placeholder="0x..."
-        />
-        <label htmlFor="guardian-threshold">Guardian threshold</label>
-        <input
-          id="guardian-threshold"
-          type="number"
-          min={1}
-          value={threshold}
-          onChange={(event) => setThreshold(event.target.value)}
-        />
-        <label htmlFor="guardian-delay">Recovery delay (seconds)</label>
-        <input
-          id="guardian-delay"
-          type="number"
-          min={0}
-          value={recoveryDelay}
-          onChange={(event) => setRecoveryDelay(event.target.value)}
-        />
-        <label htmlFor="guardian-target">Recovery target / new owner</label>
-        <input
-          id="guardian-target"
-          value={recoveryTarget}
-          onChange={(event) => setRecoveryTarget(event.target.value)}
-          placeholder="0x..."
-        />
+    <section className={`${cardClass} stack stack-xxl`}>
+      <div>
+        <h2 className={sectionTitleClass}>Guardian recovery</h2>
+        <p className={sectionDescriptionClass}>
+          Manage guardians, thresholds, and execute recovery steps. The workflow mirrors the E2E suite that adds a guardian,
+          configures policies, proposes recovery, and rotates the owner back.
+        </p>
       </div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginTop: '1rem' }}>
-        <button type="button" disabled={busy} onClick={() => void handleAction('add')}>
+      <div className="form-grid">
+        <div className="stack stack-sm">
+          <label className={labelClass} htmlFor="guardian-address">
+            Guardian address
+          </label>
+          <input
+            className={inputClass}
+            id="guardian-address"
+            value={guardianAddress}
+            onChange={(event) => setGuardianAddress(event.target.value)}
+            placeholder="0x..."
+          />
+        </div>
+        <div className="stack stack-sm">
+          <label className={labelClass} htmlFor="guardian-threshold">
+            Guardian threshold
+          </label>
+          <input
+            className={inputClass}
+            id="guardian-threshold"
+            type="number"
+            min={1}
+            value={threshold}
+            onChange={(event) => setThreshold(event.target.value)}
+          />
+        </div>
+        <div className="stack stack-sm">
+          <label className={labelClass} htmlFor="guardian-delay">
+            Recovery delay (seconds)
+          </label>
+          <input
+            className={inputClass}
+            id="guardian-delay"
+            type="number"
+            min={0}
+            value={recoveryDelay}
+            onChange={(event) => setRecoveryDelay(event.target.value)}
+          />
+        </div>
+        <div className="stack stack-sm">
+          <label className={labelClass} htmlFor="guardian-target">
+            Recovery target / new owner
+          </label>
+          <input
+            className={inputClass}
+            id="guardian-target"
+            value={recoveryTarget}
+            onChange={(event) => setRecoveryTarget(event.target.value)}
+            placeholder="0x..."
+          />
+        </div>
+      </div>
+      <div className="button-group">
+        <button className={secondaryButtonClass} type="button" disabled={busy} onClick={() => void handleAction('add')}>
           Add guardian
         </button>
-        <button type="button" disabled={busy} onClick={() => void handleAction('remove')}>
+        <button className={secondaryButtonClass} type="button" disabled={busy} onClick={() => void handleAction('remove')}>
           Remove guardian
         </button>
-        <button type="button" disabled={busy} onClick={() => void handleAction('threshold')}>
+        <button className={secondaryButtonClass} type="button" disabled={busy} onClick={() => void handleAction('threshold')}>
           Set threshold
         </button>
-        <button type="button" disabled={busy} onClick={() => void handleAction('delay')}>
+        <button className={secondaryButtonClass} type="button" disabled={busy} onClick={() => void handleAction('delay')}>
           Set recovery delay
         </button>
-        <button type="button" disabled={busy} onClick={() => void handleAction('propose')}>
+        <button className={secondaryButtonClass} type="button" disabled={busy} onClick={() => void handleAction('propose')}>
           Propose recovery
         </button>
-        <button type="button" disabled={busy} onClick={() => void handleAction('confirm')}>
+        <button className={secondaryButtonClass} type="button" disabled={busy} onClick={() => void handleAction('confirm')}>
           Confirm recovery
         </button>
-        <button type="button" disabled={busy} onClick={() => void handleAction('execute')}>
+        <button className={secondaryButtonClass} type="button" disabled={busy} onClick={() => void handleAction('execute')}>
           Execute recovery
         </button>
-        <button type="button" disabled={busy} onClick={() => void handleAction('rotate')}>
+        <button className={secondaryButtonClass} type="button" disabled={busy} onClick={() => void handleAction('rotate')}>
           Rotate owner
         </button>
       </div>
-      {message ? <p aria-live="polite">{message}</p> : null}
+      {message ? (
+        <p aria-live="polite" className="text-small text-medium text-success">
+          {message}
+        </p>
+      ) : null}
       {error ? (
-        <p role="alert" style={{ color: 'crimson' }}>
+        <p role="alert" className="text-small text-strong text-error">
           {error}
         </p>
       ) : null}
@@ -847,7 +1000,7 @@ function DemoWorkspace(): JSX.Element {
   const { status, client } = useUA2();
 
   return (
-    <>
+    <div className="workspace-grid">
       <StatusCard />
       <ConnectPanel />
       {status === 'ready' && client ? (
@@ -856,47 +1009,46 @@ function DemoWorkspace(): JSX.Element {
           <PaymasterControls client={client} />
           <GuardianControls client={client} />
         </>
-      ) : null}
-    </>
+      ) : (
+        <section className={`${cardClass} stack stack-lg span-two`}>
+          <h2 className={sectionTitleClass}>Getting started</h2>
+          <p className={sectionDescriptionClass}>
+            Connect a wallet to unlock the session manager, paymaster playground, and guardian workflows.
+          </p>
+        </section>
+      )}
+    </div>
   );
 }
 
-const cardStyle: CSSProperties = {
-  border: '1px solid #ccc',
-  borderRadius: '8px',
-  padding: '1rem',
-  marginBottom: '1.5rem',
-  background: '#fff',
-  boxShadow: '0 1px 2px rgba(0,0,0,0.08)',
-};
-
-const fieldStyle: CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  gap: '0.5rem',
-  marginBottom: '1rem',
-};
-
-const gridStyle: CSSProperties = {
-  display: 'grid',
-  gridTemplateColumns: 'minmax(12rem, 1fr) minmax(12rem, 1fr)',
-  gap: '0.75rem',
-  alignItems: 'center',
-  marginBottom: '1rem',
-};
-
 function App(): JSX.Element {
   return (
-    <main style={{ fontFamily: 'system-ui, sans-serif', margin: '2rem auto', maxWidth: '64rem' }}>
-      <h1>UA² SDK Demo</h1>
-      <p>
-        This playground demonstrates wallet connection, session management, policy enforcement, paymaster
-        sponsorship, and guardian recovery flows. It is intentionally verbose to double as documentation for
-        the new E2E acceptance tests.
-      </p>
-      <UA2Provider>
-        <DemoWorkspace />
-      </UA2Provider>
+    <main className="app-shell">
+      <div className="app-ambient app-ambient--gradient" />
+      <div className="app-ambient app-ambient--glow" aria-hidden>
+        <div className="app-ambient__orb app-ambient__orb--emerald" />
+        <div className="app-ambient__orb app-ambient__orb--sky" />
+      </div>
+      <div className="app-shell__content">
+        <header className="hero-intro">
+          <span className="hero-badge">
+            UA² Playground
+          </span>
+          <h1 className="hero-title">
+            Session-aware wallet orchestration made tangible.
+          </h1>
+          <p className="hero-subtitle">
+            Explore connection flows, session policies, sponsored execution, and guardian recovery in a single immersive demo
+            experience. Every control maps to an end-to-end test so you can rehearse complex scenarios with confidence.
+          </p>
+        </header>
+        <UA2Provider>
+          <DemoWorkspace />
+        </UA2Provider>
+        <footer className="app-footer">
+          Hand-tuned dark theme · No utility framework required · Optimized for rapid experimentation.
+        </footer>
+      </div>
     </main>
   );
 }

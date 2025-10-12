@@ -1,6 +1,7 @@
 import '@testing-library/jest-dom/vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Mock } from 'vitest';
 
 vi.mock('@ua2/core', async () => {
   const actual = await vi.importActual<typeof import('@ua2/core')>('@ua2/core');
@@ -17,22 +18,34 @@ import {
   NoopPaymaster,
   type UA2Client,
   type Felt,
+  type CallTransport,
+  type SponsoredExecuteResult,
 } from '@ua2/core';
 
-function createClient(invokeMock: ReturnType<typeof vi.fn>): {
+type InvokeMock = Mock<
+  [address: Felt, entrypoint: string, calldata: Felt[]],
+  Promise<{ txHash: Felt }>
+>;
+
+function createClient(invokeMock: InvokeMock): {
   client: UA2Client;
-  executeMock: ReturnType<typeof vi.fn>;
+  executeMock: Mock<[], Promise<SponsoredExecuteResult>>;
 } {
+  const transport = { invoke: invokeMock } satisfies CallTransport;
   const account = {
     address: '0xabc' as Felt,
     chainId: '0x1' as Felt,
     ua2Address: '0xabc' as Felt,
     entrypoint: '__execute__',
-    transport: { invoke: invokeMock },
+    transport,
   };
 
   const sessions = makeSessionsManager({ account, transport: account.transport, ua2Address: account.ua2Address });
-  const executePaymasterMock = vi.fn(async () => ({ txHash: '0xpay' as Felt, sponsored: true, sponsorName: 'demo' }));
+  const executePaymasterMock = vi.fn<[], Promise<SponsoredExecuteResult>>(async () => ({
+    txHash: '0xpay' as Felt,
+    sponsored: true,
+    sponsorName: 'demo',
+  }));
   const runner = {
     execute: executePaymasterMock,
     call: vi.fn(),

@@ -125,11 +125,18 @@ This RFC proposes a neutral, modular SDK that standardizes these primitives with
 * **Base:** `UA2Account` inherits **OpenZeppelin Account** (Cairo 2.x). Storage keeps:
 
   * `owner_pubkey: felt252`
-  * `guardians: Map<felt252,bool>` + `guardianThreshold: u8`
-  * `recovery: { proposed_owner, eta }`
+  * `guardians: LegacyMap<ContractAddress,bool>` + `guardian_count: u32` + `guardian_threshold: u8`
+  * `recovery_delay: u64`
+  * `recovery_active: bool`
+  * `recovery_proposed_owner: felt252`
+  * `recovery_eta: u64`
+  * `recovery_confirms: LegacyMap<ContractAddress,bool>` + `recovery_confirm_count: u32`
+  * `recovery_proposal_id: u64`
+  * `recovery_guardian_last_confirm: LegacyMap<ContractAddress, u64>`
   * `session: Map<session_key_hash, SessionPolicy>`
   * `sessionNonce: Map<session_key_hash, u128>`
-  * `version: u32`
+  * `sessionTargetAllow: LegacyMap<(session_key_hash, ContractAddress), bool>`
+  * `sessionSelectorAllow: LegacyMap<(session_key_hash, felt252), bool>`
 
 OZ Account is the canonical base for `__validate__`/`__execute__` pattern and multicall. ([OpenZeppelin Docs][2])
 
@@ -142,21 +149,39 @@ struct SessionPolicy {
     max_calls: u32,
     calls_used: u32,
     max_value_per_call: Uint256,     // wei-like units for token/native
-    target_allow: Array<ContractAddress>,
-    selector_allow: Array<felt252>,  // Cairo fn selectors
 }
 ```
+
+Selector and target allowlists are stored separately under `sessionTargetAllow(session_key_hash, ContractAddress)` and `sessionSelectorAllow(session_key_hash, felt252)` legacy maps. The owner typically calls `add_session_with_allowlists` to write the base policy and seed those maps in a single transaction.
 
 **Validation path:**
 
 * If signature is by `owner_pubkey`: standard path.
 * Else if signature verifies to a registered **session key**:
 
-  * Check `is_active`, `now <= expires_at`, `calls_used < max_calls`.
-  * For each call in multicall: target in `target_allow`, selector in `selector_allow`, value ≤ `max_value_per_call`.
-  * Increment `calls_used` in storage; emit `SessionUsed`.
+  * Check `is_active`, `now <= expires_at`, and `calls_used + tx_call_count <= max_calls`.
+  * Require allowlist booleans for `(key_hash, target)` and `(key_hash, selector)` to be `true`.
+  * Enforce ERC-20 transfer amounts ≤ `max_value_per_call`.
+  * Require session nonce match, then verify the ECDSA signature over the poseidon-hashed call set.
+  * Call `apply_session_usage` to bump counters/nonce and emit `SessionUsed` + `SessionNonceAdvanced`.
 
-**Events:** `SessionAdded(key_hash, policy)`, `SessionRevoked(key_hash)`, `SessionUsed(key_hash, callcount)`, `OwnerRotated`, `RecoveryProposed`, `RecoveryExecuted`.
+**Events:**
+
+```
+event SessionAdded(key_hash: felt252, expires_at: u64, max_calls: u32);
+event SessionRevoked(key_hash: felt252);
+event SessionUsed(key_hash: felt252, used: u32);
+event SessionNonceAdvanced(key_hash: felt252, new_nonce: u128);
+event GuardianAdded(addr: ContractAddress);
+event GuardianRemoved(addr: ContractAddress);
+event ThresholdSet(threshold: u8);
+event RecoveryDelaySet(delay: u64);
+event OwnerRotated(new_owner: felt252);
+event RecoveryProposed(new_owner: felt252, eta: u64);
+event RecoveryConfirmed(guardian: ContractAddress, new_owner: felt252, count: u32);
+event RecoveryCanceled();
+event RecoveryExecuted(new_owner: felt252);
+```
 
 ### 8.3 Guardians & Recovery
 
@@ -298,27 +323,46 @@ await ua.sessions.revoke(sess.id);
 event SessionAdded(key_hash: felt252, expires_at: u64, max_calls: u32);
 event SessionRevoked(key_hash: felt252);
 event SessionUsed(key_hash: felt252, used: u32);
+event SessionNonceAdvanced(key_hash: felt252, new_nonce: u128);
 event GuardianAdded(addr: ContractAddress);
 event GuardianRemoved(addr: ContractAddress);
-event RecoveryProposed(new_owner: felt252, eta: u64, quorum: u8);
-event RecoveryExecuted(new_owner: felt252);
+event ThresholdSet(threshold: u8);
+event RecoveryDelaySet(delay: u64);
 event OwnerRotated(new_owner: felt252);
+event RecoveryProposed(new_owner: felt252, eta: u64);
+event RecoveryConfirmed(guardian: ContractAddress, new_owner: felt252, count: u32);
+event RecoveryCanceled();
+event RecoveryExecuted(new_owner: felt252);
 ```
 
 **Error codes**
 
 * `ERR_SESSION_EXPIRED`
+* `ERR_SESSION_INACTIVE`
+* `ERR_POLICY_CALLCAP`
 * `ERR_POLICY_SELECTOR_DENIED`
 * `ERR_POLICY_TARGET_DENIED`
 * `ERR_VALUE_LIMIT_EXCEEDED`
-* `ERR_GUARDIAN_QUORUM`
-* `ERR_RECOVERY_NOT_READY`
+* `ERR_POLICY_CALLCOUNT_MISMATCH`
+* `ERR_BAD_SESSION_NONCE`
+* `ERR_SESSION_SIG_INVALID`
+* `ERR_GUARDIAN_EXISTS`
+* `ERR_NOT_GUARDIAN`
+* `ERR_BAD_THRESHOLD`
+* `ERR_RECOVERY_IN_PROGRESS`
+* `ERR_NO_RECOVERY`
+* `ERR_RECOVERY_MISMATCH`
+* `ERR_ALREADY_CONFIRMED`
+* `ERR_BEFORE_ETA`
+* `ERR_NOT_ENOUGH_CONFIRMS`
+* `ERR_ZERO_OWNER`
+* `ERR_SAME_OWNER`
 
 ---
 
 ## 17. Rollout & Versioning
 
-* Tag **v0.1.0**: single policy type, arrays for allowlists; argent/braavos/cartridge connectors; 1–2 paymaster adapters.
+* Tag **v0.1.0**: single policy type with dedicated allowlist maps; argent/braavos/cartridge connectors; 1–2 paymaster adapters.
 * Publish Cairo class hashes (Sepolia) in README; deploy script prints addresses.
 * Post-hackathon: v0.2.x adds bitmap encodings, WebAuthn helper, more providers.
 

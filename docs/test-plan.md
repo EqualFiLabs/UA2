@@ -58,7 +58,7 @@ Matrix:
 
 3. **Call Caps**
    - Uses ≤ `max_calls` → OK (increments `calls_used`).
-   - Exceeds `max_calls` → revert with clear error.
+   - Exceeds `max_calls` → `ERR_POLICY_CALLCAP`.
 
 4. **Selector/Target Allowlist**
    - Allowed selector+target → OK.
@@ -70,15 +70,16 @@ Matrix:
    - `value > max_value_per_call` → `ERR_VALUE_LIMIT_EXCEEDED`.
 
 6. **Revocation**
-   - After `revoke_session`, any use → revert.
+   - After `revoke_session`, any use → `ERR_SESSION_INACTIVE`.
 
 7. **Replay/Nonce**
-   - Reusing same session signature with stale nonce → revert (if nonce binding enabled).
+   - Reusing same session signature with stale nonce → `ERR_BAD_SESSION_NONCE`.
 
 8. **Guardians & Recovery**
    - `add_guardian`/`remove_guardian` events.
    - `propose_recovery` sets `eta`; `confirm_recovery` tracks quorum.
-   - Pre-ETA execute → `ERR_RECOVERY_NOT_READY`.
+   - Pre-ETA execute → `ERR_BEFORE_ETA`.
+   - Insufficient confirmations → `ERR_NOT_ENOUGH_CONFIRMS`.
    - Post-ETA; quorum met → `RecoveryExecuted` + owner updated.
    - Owner cancel window (if supported) works.
 

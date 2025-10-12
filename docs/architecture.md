@@ -9,10 +9,17 @@
   - `KeyRotation` module
 - **Storage Layout**
   - `owner_pubkey: felt252`
-  - `guardians: Map<felt252,bool>`
-  - `guardianThreshold: u8`
-  - `recovery: { proposed_owner, eta }`
+  - `guardians: LegacyMap<ContractAddress, bool>` + `guardian_count: u32` + `guardian_threshold: u8`
+  - `recovery_delay: u64`
+  - `recovery_active: bool`
+  - `recovery_proposed_owner: felt252`
+  - `recovery_eta: u64`
+  - `recovery_confirms: LegacyMap<ContractAddress, bool>` + `recovery_confirm_count: u32`
+  - `recovery_proposal_id: u64`
+  - `recovery_guardian_last_confirm: LegacyMap<ContractAddress, u64>`
   - `session: Map<session_key_hash, SessionPolicy>`
+  - `sessionTargetAllow: LegacyMap<(session_key_hash, ContractAddress), bool>`
+  - `sessionSelectorAllow: LegacyMap<(session_key_hash, felt252), bool>`
   - `sessionNonce: Map<session_key_hash,u128>`
 
 ### Off-chain (TypeScript)

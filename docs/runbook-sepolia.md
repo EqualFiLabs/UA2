@@ -260,7 +260,7 @@ npm run dev
   3. Create a session with a narrow policy
   4. Trigger an in-policy call (should pass without owner popup)
   5. Toggle “Use Paymaster” (if configured) and repeat
-  6. Revoke session and retry (should revert with `ERR_SESSION_EXPIRED` or policy error)
+  6. Revoke session and retry (should revert with `ERR_SESSION_INACTIVE` or another policy error)
 
 ---
 

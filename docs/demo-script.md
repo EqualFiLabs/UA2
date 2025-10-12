@@ -51,7 +51,7 @@ Goal: 6-minute live demo for judges
 
 ## 4:45 — Revoke
 - Revoke session in UI.
-- Retry transfer → fails with `ERR_SESSION_EXPIRED`.
+- Retry transfer → fails with `ERR_SESSION_INACTIVE`.
 - Show explorer: `SessionRevoked`.
 
 ---

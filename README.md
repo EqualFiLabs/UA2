@@ -34,6 +34,15 @@ See [`docs/architecture.md`](./docs/architecture.md) for diagrams and flow detai
 
 ## 🚀 Quickstart
 
+### 0. Configure env files
+
+```bash
+cp .env.example .env
+cp .env.sepolia.example .env.sepolia
+```
+
+> Update the copied files with your local devnet defaults (`.env`) and Sepolia RPC + UA² addresses (`.env.sepolia`).
+
 ### 1. Install deps
 ```bash
 npm ci
@@ -54,16 +63,20 @@ scarb build
 ### 3. Deploy to Sepolia
 
 ```bash
-sncast --profile sepolia declare --contract target/dev/UA2Account.sierra.json
-sncast --profile sepolia run scripts/deploy_ua2_proxy --calldata <OWNER_PUBKEY>
+# still inside packages/contracts
+export STARKNET_RPC_URL=<YOUR_SEPOLIA_RPC>
+export UA2_OWNER_PUBKEY=<OWNER_PUBKEY_FELT>
+./scripts/deploy_ua2.sh
 ```
 
-Fill `UA2_CLASS_HASH` and `UA2_PROXY_ADDR` into `.env.sepolia`.
+The helper script declares the class if needed and writes `UA2_CLASS_HASH`, `UA2_IMPLEMENTATION_ADDR`,
+and `UA2_PROXY_ADDR` to `packages/contracts/.ua2-sepolia-addresses.json`. Copy the relevant values into
+your `.env.sepolia` (created from `.env.sepolia.example`) and set `NEXT_PUBLIC_UA2_PROXY_ADDR` for the demo app.
 
 ### 4. Run demo app
 
 ```bash
-export $(grep -v '^#' .env.sepolia | xargs)
+export $(grep -v '^#' ./.env.sepolia | xargs)
 npm run dev
 ```
 

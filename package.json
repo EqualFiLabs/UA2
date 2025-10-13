@@ -13,7 +13,12 @@
     "build": "npm -ws run build",
     "lint": "npm -ws run lint",
     "test": "npm -ws run test",
+    "test:coverage": "npm -ws run test -- --coverage",
     "typecheck": "npm -ws run typecheck",
+    "test:unit": "npm run test --workspace @ua2/core && npm run test --workspace @ua2/paymasters && npm run test --workspace @ua2/react && npm run test --workspace @ua2/example",
+    "e2e:devnet": "tsx packages/example/scripts/e2e-devnet.ts",
+    "e2e:sepolia": "tsx packages/example/scripts/e2e-sepolia.ts",
+    "dev": "npm run dev --workspace @ua2/example",
     "ci": "npm run lint && npm run typecheck && npm run build && npm run test",
     "contracts:build": "cd packages/contracts && scarb build",
     "contracts:test": "cd packages/contracts && PATH=\"$HOME/.asdf/shims:$PATH\" snforge test"
@@ -21,10 +26,12 @@
   "devDependencies": {
     "@typescript-eslint/eslint-plugin": "^7.18.0",
     "@typescript-eslint/parser": "^7.18.0",
+    "@vitest/coverage-v8": "^1.6.1",
     "eslint": "^8.57.0",
     "eslint-import-resolver-typescript": "^3.6.1",
     "eslint-plugin-import": "^2.29.1",
     "prettier": "^3.2.5",
+    "tsx": "^4.20.6",
     "typescript": "~5.5.4",
     "vitest": "^1.5.0"
   }

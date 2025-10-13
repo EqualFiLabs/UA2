@@ -75,12 +75,13 @@ function Demo() {
       </button>
       <button
         onClick={async () => {
-          const list = await sessions.list();
+          const list = await sessions.refresh();
           window.__sessLen = list.length;
         }}
       >
         list-sessions
       </button>
+      <div data-testid="session-count">{sessions.sessions.length}</div>
     </div>
   );
 }
@@ -151,6 +152,7 @@ describe('React hooks', () => {
     });
 
     expect(window.__sessLen).toBe(1);
+    expect(screen.getByTestId('session-count').textContent).toBe('1');
   });
 
   it('usePaymaster works when wrapped with UA2Provider + connected', async () => {

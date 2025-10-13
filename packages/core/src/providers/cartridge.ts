@@ -1,5 +1,5 @@
 import type { WalletConnector, UA2AccountLike } from '../types';
-import { readBooleanHint, readStringHint } from './hints';
+import { readBooleanHint, readStringHint, readTransportHint } from './hints';
 
 export class CartridgeConnector implements WalletConnector {
   readonly id = 'cartridge';
@@ -19,6 +19,9 @@ export class CartridgeConnector implements WalletConnector {
       address,
       chainId,
       label: this.label,
+      transport: readTransportHint(opts, '__transport'),
+      ua2Address: readStringHint(opts, '__ua2Address'),
+      entrypoint: readStringHint(opts, '__entrypoint'),
     };
   }
 }

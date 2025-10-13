@@ -9,17 +9,18 @@
 
 ## Session Key Path
 1. Compute `key_hash` = pedersen(session_pubkey).
-2. Lookup policy in storage.
-3. Require `is_active == true`.
-4. Require `block.timestamp <= expires_at`.
-5. Require `calls_used < max_calls`.
-6. For each call in tx.multicall:
-   - target ∈ `target_allow`
-   - selector ∈ `selector_allow`
-   - value ≤ `max_value_per_call`
-7. Increment `calls_used` += number_of_calls.
-8. Emit `SessionUsed`.
-9. Proceed to `__execute__`.
+2. Lookup the base `SessionPolicy` in `session` storage and fetch allowlist booleans from `session_target_allow` / `session_selector_allow` using `(key_hash, target)` and `(key_hash, selector)` keys.
+3. Require `is_active == true` (`ERR_SESSION_INACTIVE`).
+4. Require `block.timestamp <= expires_at` (`ERR_SESSION_EXPIRED`).
+5. Require `calls_used + tx_call_count <= max_calls` (`ERR_POLICY_CALLCAP`).
+6. For each call in `tx.multicall`:
+   - Assert target allowlist entry is `true` (`ERR_POLICY_TARGET_DENIED`).
+   - Assert selector allowlist entry is `true` (`ERR_POLICY_SELECTOR_DENIED`).
+   - If selector == `ERC20::transfer`, ensure amount ≤ `max_value_per_call` (`ERR_VALUE_LIMIT_EXCEEDED`).
+7. Require provided session nonce == stored nonce (`ERR_BAD_SESSION_NONCE`).
+8. Verify ECDSA signature against the computed session message (`ERR_SESSION_SIG_INVALID`).
+9. Call `apply_session_usage` to atomically bump `calls_used`, advance the nonce, and emit `SessionUsed` + `SessionNonceAdvanced`.
+10. Proceed to `__execute__`.
 
 If any check fails → revert with specific error code.
 
@@ -45,7 +46,7 @@ If any check fails → revert with specific error code.
 
 ## Revocation Flow
 - `revoke_session(key_hash)` sets `is_active = false`.
-- Any tx signed by revoked session → fail.
+- Any tx signed by revoked session → `ERR_SESSION_INACTIVE`.
 
 ---
 

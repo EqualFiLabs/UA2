@@ -51,7 +51,7 @@ Goal: 6-minute live demo for judges
 
 ## 4:45 — Revoke
 - Revoke session in UI.
-- Retry transfer → fails with `ERR_SESSION_EXPIRED`.
+- Retry transfer → fails with `ERR_SESSION_INACTIVE`.
 - Show explorer: `SessionRevoked`.
 
 ---
@@ -70,3 +70,9 @@ Goal: 6-minute live demo for judges
 - Invite collaboration: "Wallets, dApps, games — you can adopt this tomorrow."
 
 ---
+
+## Appendix — Capturing the UI Screenshot
+- Run `npm install` from the monorepo root to ensure dependencies are present.
+- Start the Vite dev server with `npm run dev --workspace @ua2/example -- --host 0.0.0.0 --port 4173`.
+- From another shell, capture the current dark theme state with `npx playwright@1.45.3 screenshot http://127.0.0.1:4173 docs/demo-dark-theme.png`.
+- Commit the generated `docs/demo-dark-theme.png` so reviewers can verify the styling without rebuilding the demo locally.

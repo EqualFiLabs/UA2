@@ -42,7 +42,14 @@ npm run bootstrap || true
 
 ## 2) Environment files
 
-Create the following env files:
+Copy the provided templates and then adjust the values:
+
+```bash
+cp .env.example .env
+cp .env.sepolia.example .env.sepolia
+```
+
+Populate them as follows:
 
 **`./.env`** (local devnet defaults)
 
@@ -54,8 +61,14 @@ NODE_ENV=development
 STARKNET_RPC_URL=http://127.0.0.1:5050
 STARKNET_NETWORK=devnet
 
+# UA² contracts (fill after local deploys)
+UA2_CLASS_HASH=
+UA2_IMPLEMENTATION_ADDR=
+UA2_PROXY_ADDR=
+
 # Demo app
 NEXT_PUBLIC_NETWORK=devnet
+NEXT_PUBLIC_UA2_PROXY_ADDR=
 ```
 
 **`./.env.sepolia`** (testnet)
@@ -165,23 +178,17 @@ From repo root:
 ```bash
 cd packages/contracts
 
-# 6.1 Declare implementation (class hash)
-sncast --profile sepolia declare \
-  --contract target/dev/UA2Account.sierra.json
+export STARKNET_RPC_URL=<YOUR_SEPOLIA_RPC>
+export UA2_OWNER_PUBKEY=<OWNER_PUBKEY_FELT>
+./scripts/deploy_ua2.sh
 
-# Output contains `class_hash: 0x...`
-# Copy it into UA2_CLASS_HASH in .env.sepolia
-
-# 6.2 Deploy implementation behind an OZ-style proxy (provided script)
-sncast --profile sepolia run scripts/deploy_ua2_proxy \
-  --calldata <OWNER_PUBKEY_FELT>
-
-# Script prints:
-# implementation: 0x...
-# proxy:          0x...
+# Script output includes:
+# class hash:    0x...
+# contract_address: 0x...
 ```
 
-Paste values into **`.env.sepolia`**:
+The script writes the resolved values to `packages/contracts/.ua2-sepolia-addresses.json`. Paste the
+latest entries into **`.env.sepolia`**:
 
 ```
 UA2_CLASS_HASH=0x...
@@ -190,7 +197,7 @@ UA2_PROXY_ADDR=0x...
 NEXT_PUBLIC_UA2_PROXY_ADDR=0x...
 ```
 
-Commit env (without secrets) or keep local.
+Commit env (without secrets) or keep local. The `.env.sepolia.example` template matches these keys.
 
 ---
 
@@ -200,8 +207,7 @@ Commit env (without secrets) or keep local.
 # Read owner
 sncast --profile sepolia call \
   --address $UA2_PROXY_ADDR \
-  --function get_owner \
-  --calldata ""
+  --function get_owner
 ```
 
 Expected:
@@ -213,15 +219,27 @@ result: [0x<OWNER_PUBKEY_FELT>]
 Add a dummy session key (owner-signed tx):
 
 ```bash
-# Example: add session with 8h expiry, 50 max calls, no value
-# (selectors/targets are demo values; replace with real addresses/selectors)
+# Example: add session with 8h expiry, 50 max calls, single target, two selectors
 sncast --profile sepolia invoke \
   --address $UA2_PROXY_ADDR \
-  --function add_session \
-  --calldata <SESSION_PUBKEY_FELT> 28800 50 0 0 0
+  --function add_session_with_allowlists \
+  --calldata \
+    <SESSION_PUBKEY_FELT> \
+    1 \
+    28800 \
+    50 \
+    0 \
+    0 0 \
+    1 \
+    <TARGET_CONTRACT_ADDR> \
+    2 \
+    <ALLOWED_SELECTOR_1> \
+    <ALLOWED_SELECTOR_2>
 ```
 
-> If the contract checks revert, verify you supplied proper calldata as per `docs/interfaces.md`.
+The calldata order is: session key, `is_active`, `expires_at`, `max_calls`, `calls_used`, `max_value_per_call.low`,
+`max_value_per_call.high`, number of allowed targets, each target address, number of allowed selectors, each selector felt.
+If the contract checks revert, verify you supplied proper calldata as per `docs/interfaces.md`.
 
 ---
 
@@ -232,7 +250,7 @@ If you have a paymaster provider:
 ```bash
 # In JS SDK usage (example):
 # UA2.paymasters.from('starknet-react:<provider>') or custom adapter
-npm run test:paymaster
+npm run test --workspace @ua2/paymasters
 ```
 
 Expected: Sponsored tx succeeds; negative-path test shows a clear error.
@@ -260,7 +278,7 @@ npm run dev
   3. Create a session with a narrow policy
   4. Trigger an in-policy call (should pass without owner popup)
   5. Toggle “Use Paymaster” (if configured) and repeat
-  6. Revoke session and retry (should revert with `ERR_SESSION_EXPIRED` or policy error)
+  6. Revoke session and retry (should revert with `ERR_SESSION_INACTIVE` or another policy error)
 
 ---
 

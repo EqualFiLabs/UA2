@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { connect } from '../src/connect';
-import type { ConnectOptions } from '../src/types';
+import type { ConnectOptions, Felt, CallTransport } from '../src/types';
+import { ProviderUnavailableError } from '../src/errors';
+import { NoopPaymaster } from '../src/paymasters';
 
 describe('UA2.connect() provider selection', () => {
   it('chooses first available in preferred order', async () => {
@@ -43,7 +45,7 @@ describe('UA2.connect() provider selection', () => {
       }
     };
 
-    await expect(connect(opts)).rejects.toThrow(/No available wallet connectors/);
+    await expect(connect(opts)).rejects.toBeInstanceOf(ProviderUnavailableError);
   });
 
   it('deduplicates preferred list', async () => {
@@ -57,5 +59,37 @@ describe('UA2.connect() provider selection', () => {
     const client = await connect(opts);
     expect(client.connectorId).toBe('argent');
     expect(client.address).toBe('0xA');
+  });
+
+  it('exposes withPaymaster helper on client', async () => {
+    const sent: Felt[][] = [];
+    const transport: CallTransport = {
+      async invoke(_address, _entrypoint, calldata) {
+        sent.push([...calldata]);
+        return { txHash: '0xF00' as Felt };
+      },
+    };
+
+    const opts: ConnectOptions = {
+      preferred: ['argent'],
+      fallback: false,
+      hints: {
+        argent: {
+          __available: true,
+          __address: '0xACC',
+          __chainId: '0xSEPOLIA',
+        },
+      },
+    };
+
+    const client = await connect(opts);
+    const runner = client.withPaymaster(new NoopPaymaster(), {
+      transport,
+      ua2Address: client.address,
+    });
+
+    const res = await runner.execute({ to: '0x1', selector: '0x2', calldata: [] });
+    expect(res.txHash).toBe('0xF00');
+    expect(sent).toHaveLength(1);
   });
 });

@@ -20,13 +20,12 @@ use starknet::syscalls::call_contract_syscall;
 use starknet::{ContractAddress, SyscallResult, SyscallResultTrait};
 use ua2_contracts::ua2_account::UA2Account::SessionPolicy;
 use ua2_contracts::session::Session;
+use ua2_contracts::errors::{ERR_BAD_SESSION_NONCE, ERR_SESSION_SIG_INVALID};
 
 use crate::session_test_utils::{build_session_signature, session_key};
 
 const OWNER_PUBKEY: felt252 = 0x12345;
 const TRANSFER_SELECTOR: felt252 = starknet::selector!("transfer");
-const ERR_BAD_SESSION_NONCE: felt252 = 'ERR_BAD_SESSION_NONCE';
-const ERR_SESSION_SIG_INVALID: felt252 = 'ERR_SESSION_SIG_INVALID';
 
 fn deploy_account_and_mock() -> (ContractAddress, ContractAddress) {
     let account_declare = declare("UA2Account").unwrap();

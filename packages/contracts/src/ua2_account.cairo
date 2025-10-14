@@ -5,6 +5,36 @@ use openzeppelin::introspection::src5::SRC5Component;
 #[feature("deprecated_legacy_map")]
 pub mod UA2Account {
     use super::{AccountComponent, SRC5Component};
+    use crate::errors::{
+        ERR_ALREADY_CONFIRMED,
+        ERR_BAD_SESSION_NONCE,
+        ERR_BAD_THRESHOLD,
+        ERR_BEFORE_ETA,
+        ERR_GUARDIAN_CALL_DENIED,
+        ERR_GUARDIAN_EXISTS,
+        ERR_GUARDIAN_SIG_INVALID,
+        ERR_NO_RECOVERY,
+        ERR_NOT_ENOUGH_CONFIRMS,
+        ERR_NOT_GUARDIAN,
+        ERR_NOT_OWNER,
+        ERR_OWNER_SIG_INVALID,
+        ERR_POLICY_CALLCAP,
+        ERR_POLICY_CALLCOUNT_MISMATCH,
+        ERR_POLICY_SELECTOR_DENIED,
+        ERR_POLICY_TARGET_DENIED,
+        ERR_RECOVERY_IN_PROGRESS,
+        ERR_RECOVERY_MISMATCH,
+        ERR_SAME_OWNER,
+        ERR_SESSION_EXPIRED,
+        ERR_SESSION_INACTIVE,
+        ERR_SESSION_NOT_READY,
+        ERR_SESSION_SELECTORS_LEN,
+        ERR_SESSION_SIG_INVALID,
+        ERR_SESSION_TARGETS_LEN,
+        ERR_SIGNATURE_MISSING,
+        ERR_VALUE_LIMIT_EXCEEDED,
+        ERR_ZERO_OWNER,
+    };
     use crate::session::Session;
     use core::array::{Array, ArrayTrait, SpanTrait};
     use core::option::Option;
@@ -29,33 +59,6 @@ pub mod UA2Account {
     component!(path: AccountComponent, storage: account, event: AccountEvent);
     component!(path: SRC5Component, storage: src5, event: SRC5Event);
 
-    const ERR_SESSION_EXPIRED: felt252 = 'ERR_SESSION_EXPIRED';
-    const ERR_SESSION_INACTIVE: felt252 = 'ERR_SESSION_INACTIVE';
-    const ERR_POLICY_CALLCAP: felt252 = 'ERR_POLICY_CALLCAP';
-    const ERR_POLICY_SELECTOR_DENIED: felt252 = 'ERR_POLICY_SELECTOR_DENIED';
-    const ERR_POLICY_TARGET_DENIED: felt252 = 'ERR_POLICY_TARGET_DENIED';
-    const ERR_VALUE_LIMIT_EXCEEDED: felt252 = 'ERR_VALUE_LIMIT_EXCEEDED';
-    const ERR_SESSION_NOT_READY: felt252 = 'ERR_SESSION_NOT_READY';
-    const ERR_SESSION_TARGETS_LEN: felt252 = 'ERR_SESSION_TARGETS_LEN';
-    const ERR_SESSION_SELECTORS_LEN: felt252 = 'ERR_SESSION_SELECTORS_LEN';
-    const ERR_POLICY_CALLCOUNT_MISMATCH: felt252 = 'ERR_POLICY_CALLCOUNT_MISMATCH';
-    const ERR_BAD_SESSION_NONCE: felt252 = 'ERR_BAD_SESSION_NONCE';
-    const ERR_SESSION_SIG_INVALID: felt252 = 'ERR_SESSION_SIG_INVALID';
-    const ERR_GUARDIAN_EXISTS: felt252 = 'ERR_GUARDIAN_EXISTS';
-    const ERR_NOT_GUARDIAN: felt252 = 'ERR_NOT_GUARDIAN';
-    const ERR_BAD_THRESHOLD: felt252 = 'ERR_BAD_THRESHOLD';
-    const ERR_RECOVERY_IN_PROGRESS: felt252 = 'ERR_RECOVERY_IN_PROGRESS';
-    const ERR_NO_RECOVERY: felt252 = 'ERR_NO_RECOVERY';
-    const ERR_RECOVERY_MISMATCH: felt252 = 'ERR_RECOVERY_MISMATCH';
-    const ERR_ALREADY_CONFIRMED: felt252 = 'ERR_ALREADY_CONFIRMED';
-    const ERR_BEFORE_ETA: felt252 = 'ERR_BEFORE_ETA';
-    const ERR_NOT_ENOUGH_CONFIRMS: felt252 = 'ERR_NOT_ENOUGH_CONFIRMS';
-    const ERR_ZERO_OWNER: felt252 = 'ERR_ZERO_OWNER';
-    const ERR_SAME_OWNER: felt252 = 'ERR_SAME_OWNER';
-    const ERR_SIGNATURE_MISSING: felt252 = 'ERR_SIGNATURE_MISSING';
-    const ERR_OWNER_SIG_INVALID: felt252 = 'ERR_OWNER_SIG_INVALID';
-    const ERR_GUARDIAN_SIG_INVALID: felt252 = 'ERR_GUARDIAN_SIG_INVALID';
-    const ERR_GUARDIAN_CALL_DENIED: felt252 = 'ERR_GUARDIAN_CALL_DENIED';
     const ERC20_TRANSFER_SEL: felt252 = 0x83afd3f4caedc6eebf44246fe54e38c95e3179a5ec9ea81740eca5b482d12e;
     const APPLY_SESSION_USAGE_SELECTOR: felt252 = starknet::selector!("apply_session_usage");
     const PROPOSE_RECOVERY_SELECTOR: felt252 = starknet::selector!("propose_recovery");
@@ -146,6 +149,21 @@ pub mod UA2Account {
     }
 
     #[derive(Drop, starknet::Event)]
+    pub struct GuardianProposed {
+        pub guardian: ContractAddress,
+        pub proposal_id: u64,
+        pub new_owner: felt252,
+        pub eta: u64,
+    }
+
+    #[derive(Drop, starknet::Event)]
+    pub struct GuardianFinalized {
+        pub guardian: ContractAddress,
+        pub proposal_id: u64,
+        pub new_owner: felt252,
+    }
+
+    #[derive(Drop, starknet::Event)]
     pub struct RecoveryProposed {
         pub new_owner: felt252,
         pub eta: u64,
@@ -189,6 +207,8 @@ pub mod UA2Account {
         ThresholdSet: ThresholdSet,
         RecoveryDelaySet: RecoveryDelaySet,
         OwnerRotated: OwnerRotated,
+        GuardianProposed: GuardianProposed,
+        GuardianFinalized: GuardianFinalized,
         RecoveryProposed: RecoveryProposed,
         RecoveryConfirmed: RecoveryConfirmed,
         RecoveryCanceled: RecoveryCanceled,
@@ -209,7 +229,7 @@ pub mod UA2Account {
     fn assert_owner() {
         let caller: ContractAddress = get_caller_address();
         let contract_address: ContractAddress = get_contract_address();
-        assert(caller == contract_address, 'NOT_OWNER');
+        assert(caller == contract_address, ERR_NOT_OWNER);
     }
 
     fn require(condition: bool, error: felt252) {
@@ -343,6 +363,14 @@ pub mod UA2Account {
             );
         }
 
+        self.emit(
+            Event::GuardianProposed(GuardianProposed {
+                guardian: caller,
+                proposal_id,
+                new_owner,
+                eta,
+            }),
+        );
         self.emit(Event::RecoveryProposed(RecoveryProposed { new_owner, eta }));
     }
 
@@ -400,6 +428,7 @@ pub mod UA2Account {
 
     #[external(v0)]
     fn execute_recovery(ref self: ContractState) {
+        let caller = get_caller_address();
         let active = self.recovery_active.read();
         assert(active == true, ERR_NO_RECOVERY);
 
@@ -413,12 +442,20 @@ pub mod UA2Account {
         assert(now >= eta, ERR_BEFORE_ETA);
 
         let new_owner = self.recovery_proposed_owner.read();
+        let proposal_id = self.recovery_proposal_id.read();
         self.owner_pubkey.write(new_owner);
 
         _clear_recovery_state(ref self);
 
         self.emit(Event::OwnerRotated(OwnerRotated { new_owner }));
         self.emit(Event::RecoveryExecuted(RecoveryExecuted { new_owner }));
+        self.emit(
+            Event::GuardianFinalized(GuardianFinalized {
+                guardian: caller,
+                proposal_id,
+                new_owner,
+            }),
+        );
     }
 
     fn u256_le(lhs: u256, rhs: u256) -> bool {

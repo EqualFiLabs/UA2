@@ -21,18 +21,20 @@ use starknet::syscalls::call_contract_syscall;
 use starknet::{ContractAddress, SyscallResult, SyscallResultTrait};
 use ua2_contracts::ua2_account::UA2Account::SessionPolicy;
 use ua2_contracts::session::Session;
+use ua2_contracts::errors::{
+    ERR_POLICY_CALLCAP,
+    ERR_POLICY_SELECTOR_DENIED,
+    ERR_POLICY_TARGET_DENIED,
+    ERR_SESSION_EXPIRED,
+    ERR_SESSION_SELECTORS_LEN,
+    ERR_SESSION_TARGETS_LEN,
+    ERR_VALUE_LIMIT_EXCEEDED,
+};
 
 use crate::session_test_utils::{build_session_signature, session_key};
 
 const OWNER_PUBKEY: felt252 = 0x12345;
 const TRANSFER_SELECTOR: felt252 = starknet::selector!("transfer");
-const ERR_POLICY_SELECTOR_DENIED: felt252 = 'ERR_POLICY_SELECTOR_DENIED';
-const ERR_POLICY_TARGET_DENIED: felt252 = 'ERR_POLICY_TARGET_DENIED';
-const ERR_SESSION_EXPIRED: felt252 = 'ERR_SESSION_EXPIRED';
-const ERR_SESSION_TARGETS_LEN: felt252 = 'ERR_SESSION_TARGETS_LEN';
-const ERR_SESSION_SELECTORS_LEN: felt252 = 'ERR_SESSION_SELECTORS_LEN';
-const ERR_POLICY_CALLCAP: felt252 = 'ERR_POLICY_CALLCAP';
-const ERR_VALUE_LIMIT_EXCEEDED: felt252 = 'ERR_VALUE_LIMIT_EXCEEDED';
 
 fn deploy_account_and_mock() -> (ContractAddress, ContractAddress) {
     let account_declare = declare("UA2Account").unwrap();

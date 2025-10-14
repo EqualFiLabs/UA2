@@ -19,11 +19,9 @@ use ua2_contracts::ua2_account::UA2Account::{
     RecoveryDelaySet,
     ThresholdSet,
 };
+use ua2_contracts::errors::{ERR_BAD_THRESHOLD, ERR_GUARDIAN_EXISTS, ERR_NOT_GUARDIAN};
 
 const OWNER_PUBKEY: felt252 = 0x12345;
-const ERR_GUARDIAN_EXISTS: felt252 = 'ERR_GUARDIAN_EXISTS';
-const ERR_BAD_THRESHOLD: felt252 = 'ERR_BAD_THRESHOLD';
-const ERR_NOT_GUARDIAN: felt252 = 'ERR_NOT_GUARDIAN';
 
 fn deploy_account() -> ContractAddress {
     let declare_result = declare("UA2Account").unwrap();

@@ -12,12 +12,10 @@ use snforge_std::{
 use starknet::{ContractAddress, SyscallResult, SyscallResultTrait};
 use starknet::syscalls::call_contract_syscall;
 use ua2_contracts::ua2_account::UA2Account::{Event, OwnerRotated};
+use ua2_contracts::errors::{ERR_NOT_OWNER, ERR_SAME_OWNER, ERR_ZERO_OWNER};
 
 const OWNER_PUBKEY: felt252 = 0x111;
 const NEW_OWNER: felt252 = 0x222;
-const ERR_ZERO_OWNER: felt252 = 'ERR_ZERO_OWNER';
-const ERR_SAME_OWNER: felt252 = 'ERR_SAME_OWNER';
-const ERR_NOT_OWNER: felt252 = 'NOT_OWNER';
 
 fn deploy_account() -> ContractAddress {
     let declare_result = declare("UA2Account").unwrap();

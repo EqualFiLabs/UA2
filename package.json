@@ -16,9 +16,9 @@
     "test:coverage": "npm -ws run test -- --coverage",
     "typecheck": "npm -ws run typecheck",
     "test:unit": "npm run test --workspace @ua2/core && npm run test --workspace @ua2/paymasters && npm run test --workspace @ua2/react && npm run test --workspace @ua2/example",
+    "dev": "npm run dev --workspace @ua2/example",
     "e2e:devnet": "tsx packages/example/scripts/e2e-devnet.ts",
     "e2e:sepolia": "tsx packages/example/scripts/e2e-sepolia.ts",
-    "dev": "npm run dev --workspace @ua2/example",
     "ci": "npm run lint && npm run typecheck && npm run build && npm run test",
     "contracts:build": "cd packages/contracts && scarb build",
     "contracts:test": "cd packages/contracts && PATH=\"$HOME/.asdf/shims:$PATH\" snforge test"

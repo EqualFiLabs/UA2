@@ -130,7 +130,7 @@ This RFC proposes a neutral, modular SDK that standardizes these primitives with
   * `recovery_active: bool`
   * `recovery_proposed_owner: felt252`
   * `recovery_eta: u64`
-  * `recovery_confirms: LegacyMap<ContractAddress,bool>` + `recovery_confirm_count: u32`
+  * `recovery_confirm_count: u32`
   * `recovery_proposal_id: u64`
   * `recovery_guardian_last_confirm: LegacyMap<ContractAddress, u64>`
   * `session: Map<session_key_hash, SessionPolicy>`

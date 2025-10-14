@@ -80,7 +80,6 @@ pub mod UA2Account {
         recovery_active: bool,
         recovery_proposed_owner: felt252,
         recovery_eta: u64,
-        recovery_confirms: LegacyMap<ContractAddress, bool>,
         recovery_confirm_count: u32,
         recovery_proposal_id: u64,
         recovery_guardian_last_confirm: LegacyMap<ContractAddress, u64>,
@@ -238,6 +237,22 @@ pub mod UA2Account {
         self.recovery_confirm_count.write(0_u32);
     }
 
+    fn _record_recovery_confirmation(
+        ref self: ContractState,
+        guardian: ContractAddress,
+        proposal_id: u64,
+        last_confirm: u64,
+    ) -> u32 {
+        assert(last_confirm != proposal_id, ERR_ALREADY_CONFIRMED);
+
+        self.recovery_guardian_last_confirm.write(guardian, proposal_id);
+
+        let new_count = self.recovery_confirm_count.read() + 1_u32;
+        self.recovery_confirm_count.write(new_count);
+
+        new_count
+    }
+
     #[external(v0)]
     fn add_guardian(ref self: ContractState, addr: ContractAddress) {
         assert_owner();
@@ -313,14 +328,17 @@ pub mod UA2Account {
 
         let last_confirm = self.recovery_guardian_last_confirm.read(caller);
         if last_confirm != proposal_id {
-            self.recovery_confirms.write(caller, true);
-            self.recovery_guardian_last_confirm.write(caller, proposal_id);
-            self.recovery_confirm_count.write(1_u32);
+            let confirm_count = _record_recovery_confirmation(
+                ref self,
+                caller,
+                proposal_id,
+                last_confirm,
+            );
             self.emit(
                 Event::RecoveryConfirmed(RecoveryConfirmed {
                     guardian: caller,
                     new_owner,
-                    count: 1_u32,
+                    count: confirm_count,
                 }),
             );
         }
@@ -341,19 +359,7 @@ pub mod UA2Account {
 
         let proposal_id = self.recovery_proposal_id.read();
         let last_confirm = self.recovery_guardian_last_confirm.read(caller);
-
-        if last_confirm != proposal_id {
-            self.recovery_confirms.write(caller, false);
-        }
-
-        let already_confirmed = self.recovery_confirms.read(caller);
-        assert(already_confirmed == false, ERR_ALREADY_CONFIRMED);
-
-        self.recovery_confirms.write(caller, true);
-        self.recovery_guardian_last_confirm.write(caller, proposal_id);
-
-        let new_count = self.recovery_confirm_count.read() + 1_u32;
-        self.recovery_confirm_count.write(new_count);
+        let new_count = _record_recovery_confirmation(ref self, caller, proposal_id, last_confirm);
 
         self.emit(
             Event::RecoveryConfirmed(RecoveryConfirmed {

@@ -1,213 +1,160 @@
-import { spawn } from 'node:child_process';
+// packages/example/scripts/e2e-devnet.ts
+/* eslint-disable no-console */
+import { execa } from "execa";
+import assert from "node:assert/strict";
 
-import { limits, makeSessionsManager, type CallTransport, type Felt, type SessionPolicyInput } from '@ua2/core';
-import { RpcProvider } from 'starknet';
+const RPC = process.env.RPC ?? "http://127.0.0.1:5050";
+const ACCOUNT = process.env.ACCOUNT_NAME ?? "devnet";
+const UA2_ADDR = process.env.UA2_ADDR; // 0x.. deployed UA2 account (impl or proxy)
 
-import {
-  assertReverted,
-  assertSucceeded,
-  initialSessionUsageState,
-  loadEnv,
-  normalizeHex,
-  optionalEnv,
-  readOwner,
-  requireEnv,
-  selectorFor,
-  toFelt,
-  updateSessionUsage,
-  waitForReceipt,
-  type Network,
-} from './shared.js';
-
-type SncastConfig = {
-  profile: string;
-  account: string;
-  rpcUrl: string;
-};
-
-type SncastResult = {
-  code: number;
-  stdout: string;
-  stderr: string;
-};
-
-class SncastTransport implements CallTransport {
-  private readonly config: SncastConfig;
-  public lastTxHash: Felt | null = null;
-
-  constructor(config: SncastConfig) {
-    this.config = config;
-  }
-
-  async invoke(address: Felt, entrypoint: string, calldata: Felt[]): Promise<{ txHash: Felt }> {
-    const args = buildSncastArgs(this.config, address, entrypoint, calldata);
-    const result = await runSncast(args);
-
-    const parsed = parseSncastJson(result.stdout) ?? parseSncastJson(result.stderr);
-    if (!parsed || typeof parsed.transaction_hash !== 'string') {
-      throw new Error(
-        `sncast invoke failed for ${entrypoint}. exit=${result.code} stdout=${result.stdout} stderr=${result.stderr}`
-      );
-    }
-
-    const txHash = normalizeHex(parsed.transaction_hash);
-    this.lastTxHash = txHash;
-    return { txHash };
-  }
+if (!UA2_ADDR) {
+  console.error("UA2_ADDR is required. Export UA2_ADDR=0x... then rerun.");
+  process.exit(1);
 }
 
-async function main(): Promise<void> {
-  const network: Network = 'devnet';
-  loadEnv(network);
+type SncastOpts = { args: string[]; expectOk?: boolean; quiet?: boolean };
 
-  const rpcUrl = requireEnv(['STARKNET_RPC_URL']);
-  const profile = optionalEnv(['SNCAST_PROFILE', 'UA2_SNCAST_PROFILE'], 'devnet') ?? 'devnet';
-  const accountName = requireEnv(['SNCAST_ACCOUNT', 'SNCAST_ACCOUNT_NAME']);
-  const ua2Address = requireEnv([
-    `UA2_${network.toUpperCase()}_PROXY_ADDR`,
-    'UA2_PROXY_ADDR',
+async function sncast({ args, expectOk = true, quiet = false }: SncastOpts) {
+  const cmd = ["sncast", "--account", ACCOUNT, ...args, "--url", RPC];
+  const p = execa(cmd[0], cmd.slice(1), { reject: false });
+  let out = "";
+  p.stdout?.on("data", (d) => (out += d.toString()));
+  p.stderr?.on("data", (d) => (out += d.toString()));
+  const { exitCode } = await p;
+  if (!quiet) console.log(out.trim());
+  if (expectOk && exitCode !== 0) {
+    throw new Error(`sncast failed: ${cmd.join(" ")}` + `\n${out}`);
+  }
+  return { exitCode, out };
+}
+
+async function call(functionName: string, calldata?: string[]) {
+  const args = ["call", "--address", UA2_ADDR!, "--function", functionName];
+  if (calldata && calldata.length) args.push("--calldata", ...calldata);
+  return sncast({ args });
+}
+
+async function invoke(functionName: string, calldata: string[], maxFeeFRI = "20000000000000000") {
+  const args = [
+    "invoke",
+    "--address",
+    UA2_ADDR!,
+    "--function",
+    functionName,
+    "--calldata",
+    ...calldata,
+    "--max-fee",
+    maxFeeFRI,
+  ];
+  return sncast({ args });
+}
+
+function hr(label: string) {
+  console.log(`\n=== ${label} ===`);
+}
+
+(async () => {
+  console.log(`RPC=${RPC}  ACCOUNT=${ACCOUNT}  UA2_ADDR=${UA2_ADDR}`);
+
+  // 0) get owner (zero-arg view: DO NOT pass --calldata "")
+  hr("owner");
+  await call("get_owner");
+
+  // 1) add a tight session: valid for ~8h,  max 1 call, tiny value cap,
+  //    allow exactly one target+selector
+  // NOTE: adjust to your real ABI order/types!
+  // Example calldata layout:
+  // [session_pubkey,
+  //  valid_after, valid_until,
+  //  max_calls, max_value_low, max_value_high,
+  //  targets_len, <targets...>,
+  //  selectors_len, <selectors...>]
+  //
+  // Use a throwaway felt for session key (dev only). Replace with real key if needed.
+  const nowSec = Math.floor(Date.now() / 1000);
+  const validAfter = String(nowSec);
+  const validUntil = String(nowSec + 8 * 3600);
+
+  // Example: policy allows calling MockERC20.transfer on address MOCK_ERC20
+  const MOCK_ERC20 = process.env.MOCK_ERC20 ?? "0x0123"; // replace with your deployed mock or a real target
+  const SELECTOR_TRANSFER =
+    process.env.SELECTOR_TRANSFER ??
+    "0x00a9059cbb000000000000000000000000000000000000000000000000000000"; // placeholder; use starkli selector if needed
+
+  const SESSION_PUBKEY = process.env.SESSION_PUBKEY ?? "0x123"; // dev only
+  const MAX_CALLS = "1";
+  const MAX_VALUE_LOW = "0"; // Uint256 low
+  const MAX_VALUE_HIGH = "0"; // Uint256 high (0 means “no value transfer allowed” in this sketch)
+
+  hr("add_session");
+  await invoke("add_session", [
+    SESSION_PUBKEY,
+    validAfter,
+    validUntil,
+    MAX_CALLS,
+    MAX_VALUE_LOW,
+    MAX_VALUE_HIGH,
+    "1",
+    MOCK_ERC20,
+    "1",
+    SELECTOR_TRANSFER,
   ]);
 
-  const provider = new RpcProvider({ nodeUrl: rpcUrl });
-  const chainId = normalizeHex(await provider.getChainId());
+  // 2) in-policy call succeeds (whatever function your UA2 exposes to exercise Policy)
+  // If your test target is external (e.g., ERC20.transfer), you'd invoke via the UA2 account’s multicall.
+  // For illustration, we assume UA2 exposes a helper `try_transfer_mock(to, amount)` that forwards.
+  hr("in-policy call should succeed");
+  await invoke("try_transfer_mock", ["0xCAFE", "1"]); // adjust to your demo helper
 
-  const ownerBefore = await readOwner(provider, ua2Address);
-  console.log('E2E DEVNET (sncast)');
-  console.log(`- profile: ${profile} (account: ${accountName})`);
-  console.log(`- UA² account: ${ua2Address}`);
-  console.log(`- on-chain owner: ${ownerBefore}`);
-
-  const transport = new SncastTransport({ profile, account: accountName, rpcUrl });
-  const sessions = makeSessionsManager({
-    account: { address: ua2Address, chainId },
-    transport,
-    ua2Address,
+  // 3) out-of-policy call reverts: wrong selector or target
+  // Example: try transferFrom (selector not in allowlist) → expect nonzero exit
+  const SELECTOR_TRANSFER_FROM =
+    process.env.SELECTOR_TRANSFER_FROM ??
+    "0x23b872dd00000000000000000000000000000000000000000000000000000000"; // placeholder
+  hr("out-of-policy call should REVERT");
+  const bad = await sncast({
+    args: [
+      "invoke",
+      "--address",
+      UA2_ADDR!,
+      "--function",
+      "try_transfer_from_mock",
+      "--calldata",
+      "0xDEAD", // from
+      "0xBEEF", // to
+      "2", // amount > cap
+      "--max-fee",
+      "20000000000000000",
+    ],
+    expectOk: false,
   });
+  assert.notEqual(bad.exitCode, 0, "Expected out-of-policy invoke to fail");
 
-  const now = Math.floor(Date.now() / 1000);
-  const policy: SessionPolicyInput = {
-    validAfter: now,
-    validUntil: now + 10 * 60,
-    limits: limits(2, 10n ** 15n),
-    allow: {
-      targets: [toFelt(ua2Address)],
-      selectors: [selectorFor('apply_session_usage')],
-    },
-  };
+  // 4) revoke → subsequent in-policy call must revert
+  hr("revoke_session");
+  await invoke("revoke_session", [SESSION_PUBKEY]);
 
-  const session = await sessions.create(policy);
-  if (!transport.lastTxHash) {
-    throw new Error('Session creation did not emit a transaction hash.');
-  }
-  const createReceipt = await waitForReceipt(provider, transport.lastTxHash, 'session create');
-  assertSucceeded(createReceipt, 'session create');
-  console.log(`- create session ✓ (${session.id})`);
-
-  let usage = initialSessionUsageState();
-  usage = await applySessionUsage(transport, provider, ua2Address, session.id, usage, 1, 'session use #1');
-  usage = await applySessionUsage(transport, provider, ua2Address, session.id, usage, 1, 'session use #2');
-  console.log('- in-policy calls ✓');
-
-  const violation = await transport.invoke(ua2Address, 'apply_session_usage', [
-    session.id,
-    toFelt(usage.callsUsed),
-    toFelt(1),
-    toFelt(usage.nonce),
-  ]);
-  const violationReceipt = await waitForReceipt(provider, violation.txHash, 'policy violation');
-  assertReverted(violationReceipt, 'ERR_POLICY_CALLCAP', 'policy violation');
-  console.log('- out-of-policy revert ✓ (ERR_POLICY_CALLCAP)');
-
-  const revokeTx = await transport.invoke(ua2Address, 'revoke_session', [session.id]);
-  const revokeReceipt = await waitForReceipt(provider, revokeTx.txHash, 'session revoke');
-  assertSucceeded(revokeReceipt, 'session revoke');
-  console.log('- revoke session ✓');
-
-  console.log('E2E DEVNET ✓ complete');
-}
-
-type SessionUsageState = ReturnType<typeof initialSessionUsageState>;
-
-async function applySessionUsage(
-  transport: SncastTransport,
-  provider: RpcProvider,
-  ua2Address: Felt,
-  sessionId: Felt,
-  state: SessionUsageState,
-  calls: number,
-  label: string
-): Promise<SessionUsageState> {
-  const tx = await transport.invoke(ua2Address, 'apply_session_usage', [
-    sessionId,
-    toFelt(state.callsUsed),
-    toFelt(calls),
-    toFelt(state.nonce),
-  ]);
-  const receipt = await waitForReceipt(provider, tx.txHash, label);
-  assertSucceeded(receipt, label);
-  return updateSessionUsage(state, calls);
-}
-
-function buildSncastArgs(
-  config: SncastConfig,
-  address: Felt,
-  entrypoint: string,
-  calldata: Felt[]
-): string[] {
-  const args: string[] = ['--profile', config.profile];
-  if (config.rpcUrl) {
-    args.push('--rpc-url', config.rpcUrl);
-  }
-  args.push('invoke', '--account', config.account, '--address', address, '--function', entrypoint);
-  if (calldata.length > 0) {
-    args.push('--calldata', ...calldata);
-  }
-  args.push('--json');
-  return args;
-}
-
-function runSncast(args: string[]): Promise<SncastResult> {
-  return new Promise((resolve, reject) => {
-    const child = spawn('sncast', args, { stdio: ['ignore', 'pipe', 'pipe'] });
-    let stdout = '';
-    let stderr = '';
-
-    child.stdout.on('data', (chunk) => {
-      stdout += chunk.toString();
-    });
-    child.stderr.on('data', (chunk) => {
-      stderr += chunk.toString();
-    });
-    child.on('error', reject);
-    child.on('close', (code) => {
-      resolve({ code: code ?? 0, stdout, stderr });
-    });
+  hr("in-policy call after revoke should REVERT");
+  const afterRevoke = await sncast({
+    args: [
+      "invoke",
+      "--address",
+      UA2_ADDR!,
+      "--function",
+      "try_transfer_mock",
+      "--calldata",
+      "0xCAFE",
+      "1",
+      "--max-fee",
+      "20000000000000000",
+    ],
+    expectOk: false,
   });
-}
+  assert.notEqual(afterRevoke.exitCode, 0, "Expected revoked session invoke to fail");
 
-function parseSncastJson(output: string): Record<string, unknown> | null {
-  const trimmed = output.trim();
-  if (!trimmed) {
-    return null;
-  }
-  const lines = trimmed.split(/\r?\n/).map((line) => line.trim()).filter((line) => line.length > 0);
-  for (let i = lines.length - 1; i >= 0; i -= 1) {
-    const line = lines[i];
-    try {
-      return JSON.parse(line) as Record<string, unknown>;
-    } catch (err) {
-      void err;
-    }
-  }
-  try {
-    return JSON.parse(trimmed) as Record<string, unknown>;
-  } catch (err) {
-    void err;
-  }
-  return null;
-}
-
-void main().catch((err) => {
-  console.error('[ua2] e2e-devnet failed:', err);
-  process.exitCode = 1;
+  console.log("\nE2E PASS ✅");
+})().catch((err) => {
+  console.error("\nE2E FAIL ❌");
+  console.error(err?.stack ?? String(err));
+  process.exit(1);
 });

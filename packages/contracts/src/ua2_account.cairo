@@ -48,8 +48,15 @@ pub mod UA2Account {
     const ERR_NOT_ENOUGH_CONFIRMS: felt252 = 'ERR_NOT_ENOUGH_CONFIRMS';
     const ERR_ZERO_OWNER: felt252 = 'ERR_ZERO_OWNER';
     const ERR_SAME_OWNER: felt252 = 'ERR_SAME_OWNER';
+    const ERR_SIGNATURE_MISSING: felt252 = 'ERR_SIGNATURE_MISSING';
+    const ERR_OWNER_SIG_INVALID: felt252 = 'ERR_OWNER_SIG_INVALID';
+    const ERR_GUARDIAN_SIG_INVALID: felt252 = 'ERR_GUARDIAN_SIG_INVALID';
+    const ERR_GUARDIAN_CALL_DENIED: felt252 = 'ERR_GUARDIAN_CALL_DENIED';
     const ERC20_TRANSFER_SEL: felt252 = 0x83afd3f4caedc6eebf44246fe54e38c95e3179a5ec9ea81740eca5b482d12e;
     const APPLY_SESSION_USAGE_SELECTOR: felt252 = starknet::selector!("apply_session_usage");
+    const PROPOSE_RECOVERY_SELECTOR: felt252 = starknet::selector!("propose_recovery");
+    const CONFIRM_RECOVERY_SELECTOR: felt252 = starknet::selector!("confirm_recovery");
+    const EXECUTE_RECOVERY_SELECTOR: felt252 = starknet::selector!("execute_recovery");
 
     #[storage]
     pub struct Storage {
@@ -514,6 +521,7 @@ pub mod UA2Account {
 
     const MODE_OWNER: felt252 = 0;
     const MODE_SESSION: felt252 = 1;
+    const MODE_GUARDIAN: felt252 = 2;
     const SESSION_DOMAIN_TAG: felt252 = 0x5541325f53455353494f4e5f5631;
 
     #[derive(Copy, Drop)]
@@ -569,6 +577,71 @@ pub mod UA2Account {
         require(low < high_limit, ERR_BAD_SESSION_NONCE);
 
         low + high * high_limit
+    }
+
+    fn extract_owner_signature(signature: Span<felt252>) -> Array<felt252> {
+        let signature_len = signature.len();
+        require(signature_len > 0_usize, ERR_SIGNATURE_MISSING);
+
+        let first = *signature.at(0_usize);
+        assert(first != MODE_SESSION && first != MODE_GUARDIAN, ERR_OWNER_SIG_INVALID);
+
+        let mut start = 0_usize;
+        if first == MODE_OWNER {
+            start = 1_usize;
+        }
+
+        let min_len = start + 2_usize;
+        require(signature_len >= min_len, ERR_OWNER_SIG_INVALID);
+
+        let mut owner_signature = ArrayTrait::<felt252>::new();
+        let mut i = start;
+        while i < signature_len {
+            owner_signature.append(*signature.at(i));
+            i += 1_usize;
+        }
+
+        owner_signature
+    }
+
+    fn validate_guardian_authorization(
+        self: @ContractState,
+        signature: Span<felt252>,
+        calls: @Array<Call>,
+    ) {
+        let signature_len = signature.len();
+        require(signature_len == 2_usize, ERR_GUARDIAN_SIG_INVALID);
+
+        let mode = *signature.at(0_usize);
+        require(mode == MODE_GUARDIAN, ERR_GUARDIAN_SIG_INVALID);
+
+        let guardian_felt = *signature.at(1_usize);
+        let guardian_address: ContractAddress = match guardian_felt.try_into() {
+            Option::Some(value) => value,
+            Option::None(_) => {
+                assert(false, ERR_GUARDIAN_SIG_INVALID);
+                0.try_into().unwrap()
+            },
+        };
+
+        let is_guardian = self.guardians.read(guardian_address);
+        require(is_guardian == true, ERR_NOT_GUARDIAN);
+
+        let calls_len = ArrayTrait::<Call>::len(calls);
+        require(calls_len > 0_usize, ERR_GUARDIAN_CALL_DENIED);
+
+        let contract_address = get_contract_address();
+
+        for call_ref in calls.span() {
+            let Call { to, selector, calldata: _ } = *call_ref;
+
+            require(to == contract_address, ERR_GUARDIAN_CALL_DENIED);
+
+            let allowed = selector == PROPOSE_RECOVERY_SELECTOR
+                || selector == CONFIRM_RECOVERY_SELECTOR
+                || selector == EXECUTE_RECOVERY_SELECTOR;
+            require(allowed, ERR_GUARDIAN_CALL_DENIED);
+        }
     }
 
     fn compute_session_message_hash(
@@ -717,50 +790,77 @@ pub mod UA2Account {
             let tx_info = starknet::get_tx_info().unbox();
             let tx_hash = tx_info.transaction_hash;
             let signature = tx_info.signature;
+            let signature_len = signature.len();
+            require(signature_len > 0_usize, ERR_SIGNATURE_MISSING);
 
-            let owner_valid = AccountComponent::InternalImpl::<ContractState>::_is_valid_signature(
-                self.account, tx_hash, signature
-            );
+            let mode = *signature.at(0_usize);
 
-            if owner_valid {
+            if mode == MODE_SESSION {
+                let validation = validate_session_policy(self, signature, @calls);
+
+                AccountComponent::AccountMixinImpl::<ContractState>::__execute__(self, calls);
+
+                let mut accounting_calldata = ArrayTrait::<felt252>::new();
+                accounting_calldata.append(validation.key_hash);
+                accounting_calldata.append(validation.policy.calls_used.into());
+                accounting_calldata.append(validation.tx_call_count.into());
+                Serde::<u128>::serialize(@validation.provided_nonce, ref accounting_calldata);
+
+                let _ = call_contract_syscall(
+                    get_contract_address(),
+                    APPLY_SESSION_USAGE_SELECTOR,
+                    accounting_calldata.span(),
+                )
+                .unwrap_syscall();
+
+                return;
+            }
+
+            if mode == MODE_GUARDIAN {
+                validate_guardian_authorization(self, signature, @calls);
                 AccountComponent::AccountMixinImpl::<ContractState>::__execute__(self, calls);
                 return;
             }
 
-            let validation = validate_session_policy(self, signature, @calls);
+            let owner_signature = extract_owner_signature(signature);
+            let owner_signature_span = owner_signature.span();
+            let owner_valid = AccountComponent::InternalImpl::<ContractState>::_is_valid_signature(
+                self.account, tx_hash, owner_signature_span
+            );
+
+            require(owner_valid, ERR_OWNER_SIG_INVALID);
 
             AccountComponent::AccountMixinImpl::<ContractState>::__execute__(self, calls);
-
-            let mut accounting_calldata = ArrayTrait::<felt252>::new();
-            accounting_calldata.append(validation.key_hash);
-            accounting_calldata.append(validation.policy.calls_used.into());
-            accounting_calldata.append(validation.tx_call_count.into());
-            Serde::<u128>::serialize(@validation.provided_nonce, ref accounting_calldata);
-
-            let _ = call_contract_syscall(
-                get_contract_address(),
-                APPLY_SESSION_USAGE_SELECTOR,
-                accounting_calldata.span(),
-            )
-            .unwrap_syscall();
         }
 
         fn __validate__(self: @ContractState, calls: Array<Call>) -> felt252 {
             let tx_info = starknet::get_tx_info().unbox();
             let tx_hash = tx_info.transaction_hash;
             let signature = tx_info.signature;
+            let signature_len = signature.len();
+            require(signature_len > 0_usize, ERR_SIGNATURE_MISSING);
 
-            let owner_valid = AccountComponent::InternalImpl::<ContractState>::_is_valid_signature(
-                self.account, tx_hash, signature
-            );
+            let mode = *signature.at(0_usize);
 
-            if owner_valid {
-                return AccountComponent::AccountMixinImpl::<ContractState>::__validate__(self, calls);
+            if mode == MODE_SESSION {
+                let _validation = validate_session_policy(self, signature, @calls);
+                return starknet::VALIDATED;
             }
 
-            let _validation = validate_session_policy(self, signature, @calls);
+            if mode == MODE_GUARDIAN {
+                validate_guardian_authorization(self, signature, @calls);
+                return starknet::VALIDATED;
+            }
 
-            starknet::VALIDATED
+            let owner_signature = extract_owner_signature(signature);
+            let owner_signature_span = owner_signature.span();
+            let owner_valid = AccountComponent::InternalImpl::<ContractState>::_is_valid_signature(
+                self.account, tx_hash, owner_signature_span
+            );
+
+            require(owner_valid, ERR_OWNER_SIG_INVALID);
+
+            AccountComponent::AccountMixinImpl::<ContractState>::__validate__(self, calls)
         }
 
         fn is_valid_signature(

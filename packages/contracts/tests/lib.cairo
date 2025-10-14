@@ -9,6 +9,7 @@ mod test_recovery_happy;
 mod test_recovery_edgecases;
 mod test_owner_rotate;
 mod test_rotate_vs_recovery;
+mod test_validate_auth;
 
 pub mod session_test_utils {
     use core::array::{Array, ArrayTrait};

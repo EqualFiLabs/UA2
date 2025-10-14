@@ -1,160 +1,305 @@
-// packages/example/scripts/e2e-devnet.ts
-/* eslint-disable no-console */
-import { execa } from "execa";
-import assert from "node:assert/strict";
+import fsPromises from 'node:fs/promises';
+import path from 'node:path';
 
-const RPC = process.env.RPC ?? "http://127.0.0.1:5050";
-const ACCOUNT = process.env.ACCOUNT_NAME ?? "devnet";
-const UA2_ADDR = process.env.UA2_ADDR; // 0x.. deployed UA2 account (impl or proxy)
+import { limits, makeSessionsManager, type SessionPolicyInput } from '@ua2/core';
+import { Account } from 'starknet';
 
-if (!UA2_ADDR) {
-  console.error("UA2_ADDR is required. Export UA2_ADDR=0x... then rerun.");
-  process.exit(1);
-}
+import {
+  AccountCallTransport,
+  assertReverted,
+  assertSucceeded,
+  deriveSessionKeyHash,
+  ensureUa2Deployed,
+  initialSessionUsageState,
+  logReceipt,
+  optionalEnv,
+  readOwner,
+  selectorFor,
+  setupToolkit,
+  toFelt,
+  updateSessionUsage,
+  waitForReceipt,
+  normalizeHex,
+  PROJECT_ROOT,
+} from './shared.js';
 
-type SncastOpts = { args: string[]; expectOk?: boolean; quiet?: boolean };
+type DevnetAddresses = {
+  ua2Address: string;
+  classHash: string;
+  network: string;
+  updatedAt: string;
+};
 
-async function sncast({ args, expectOk = true, quiet = false }: SncastOpts) {
-  const cmd = ["sncast", "--account", ACCOUNT, ...args, "--url", RPC];
-  const p = execa(cmd[0], cmd.slice(1), { reject: false });
-  let out = "";
-  p.stdout?.on("data", (d) => (out += d.toString()));
-  p.stderr?.on("data", (d) => (out += d.toString()));
-  const { exitCode } = await p;
-  if (!quiet) console.log(out.trim());
-  if (expectOk && exitCode !== 0) {
-    throw new Error(`sncast failed: ${cmd.join(" ")}` + `\n${out}`);
-  }
-  return { exitCode, out };
-}
+type DeploymentInfo = Awaited<ReturnType<typeof ensureUa2Deployed>>;
 
-async function call(functionName: string, calldata?: string[]) {
-  const args = ["call", "--address", UA2_ADDR!, "--function", functionName];
-  if (calldata && calldata.length) args.push("--calldata", ...calldata);
-  return sncast({ args });
-}
+const ADDRESSES_FILE = path.resolve(PROJECT_ROOT, '.ua2-devnet-addresses.json');
+const RECEIPT_TIMEOUT_MS = 60_000;
 
-async function invoke(functionName: string, calldata: string[], maxFeeFRI = "20000000000000000") {
-  const args = [
-    "invoke",
-    "--address",
-    UA2_ADDR!,
-    "--function",
-    functionName,
-    "--calldata",
-    ...calldata,
-    "--max-fee",
-    maxFeeFRI,
-  ];
-  return sncast({ args });
-}
+async function main(): Promise<void> {
+  console.log('[ua2] e2e devnet starting');
 
-function hr(label: string) {
-  console.log(`\n=== ${label} ===`);
-}
+  const toolkit = await setupToolkit('devnet');
 
-(async () => {
-  console.log(`RPC=${RPC}  ACCOUNT=${ACCOUNT}  UA2_ADDR=${UA2_ADDR}`);
-
-  // 0) get owner (zero-arg view: DO NOT pass --calldata "")
-  hr("owner");
-  await call("get_owner");
-
-  // 1) add a tight session: valid for ~8h,  max 1 call, tiny value cap,
-  //    allow exactly one target+selector
-  // NOTE: adjust to your real ABI order/types!
-  // Example calldata layout:
-  // [session_pubkey,
-  //  valid_after, valid_until,
-  //  max_calls, max_value_low, max_value_high,
-  //  targets_len, <targets...>,
-  //  selectors_len, <selectors...>]
-  //
-  // Use a throwaway felt for session key (dev only). Replace with real key if needed.
-  const nowSec = Math.floor(Date.now() / 1000);
-  const validAfter = String(nowSec);
-  const validUntil = String(nowSec + 8 * 3600);
-
-  // Example: policy allows calling MockERC20.transfer on address MOCK_ERC20
-  const MOCK_ERC20 = process.env.MOCK_ERC20 ?? "0x0123"; // replace with your deployed mock or a real target
-  const SELECTOR_TRANSFER =
-    process.env.SELECTOR_TRANSFER ??
-    "0x00a9059cbb000000000000000000000000000000000000000000000000000000"; // placeholder; use starkli selector if needed
-
-  const SESSION_PUBKEY = process.env.SESSION_PUBKEY ?? "0x123"; // dev only
-  const MAX_CALLS = "1";
-  const MAX_VALUE_LOW = "0"; // Uint256 low
-  const MAX_VALUE_HIGH = "0"; // Uint256 high (0 means “no value transfer allowed” in this sketch)
-
-  hr("add_session");
-  await invoke("add_session", [
-    SESSION_PUBKEY,
-    validAfter,
-    validUntil,
-    MAX_CALLS,
-    MAX_VALUE_LOW,
-    MAX_VALUE_HIGH,
-    "1",
-    MOCK_ERC20,
-    "1",
-    SELECTOR_TRANSFER,
+  const envAddress = optionalEnv([
+    'UA2_DEVNET_PROXY_ADDR',
+    'UA2_DEVNET_ADDR',
+    'UA2_PROXY_ADDR',
+    'UA2_ADDR',
   ]);
 
-  // 2) in-policy call succeeds (whatever function your UA2 exposes to exercise Policy)
-  // If your test target is external (e.g., ERC20.transfer), you'd invoke via the UA2 account’s multicall.
-  // For illustration, we assume UA2 exposes a helper `try_transfer_mock(to, amount)` that forwards.
-  hr("in-policy call should succeed");
-  await invoke("try_transfer_mock", ["0xCAFE", "1"]); // adjust to your demo helper
+  const cached = envAddress ? undefined : await readCachedAddresses();
 
-  // 3) out-of-policy call reverts: wrong selector or target
-  // Example: try transferFrom (selector not in allowlist) → expect nonzero exit
-  const SELECTOR_TRANSFER_FROM =
-    process.env.SELECTOR_TRANSFER_FROM ??
-    "0x23b872dd00000000000000000000000000000000000000000000000000000000"; // placeholder
-  hr("out-of-policy call should REVERT");
-  const bad = await sncast({
-    args: [
-      "invoke",
-      "--address",
-      UA2_ADDR!,
-      "--function",
-      "try_transfer_from_mock",
-      "--calldata",
-      "0xDEAD", // from
-      "0xBEEF", // to
-      "2", // amount > cap
-      "--max-fee",
-      "20000000000000000",
-    ],
-    expectOk: false,
+  let deployment = await pickDeployment(toolkit, envAddress, cached?.ua2Address);
+  const ua2Address = normalizeHex(deployment.address);
+  const source = envAddress ? 'env' : cached ? 'cache' : 'deploy';
+
+  if (!envAddress) {
+    await writeCachedAddresses({
+      ua2Address,
+      classHash: normalizeHex(deployment.classHash),
+      network: toolkit.network,
+      updatedAt: new Date().toISOString(),
+    });
+    const relPath = path.relative(PROJECT_ROOT, ADDRESSES_FILE);
+    console.log(`[ua2] cached addresses written to ${relPath}`);
+  }
+
+  console.log(`[ua2] using UA² account ${ua2Address} (${source})`);
+
+  const ownerOnChain = await readOwner(toolkit.provider, ua2Address);
+  if (ownerOnChain.toLowerCase() !== toolkit.ownerPubKey.toLowerCase()) {
+    console.warn(
+      `[ua2] warning: on-chain owner ${ownerOnChain} differs from configured owner ${toolkit.ownerPubKey}`
+    );
+  }
+
+  const ownerAccount = new Account(toolkit.provider, ua2Address, toolkit.ownerKey);
+  const ownerTransport = new AccountCallTransport(ownerAccount);
+
+  const sessions = makeSessionsManager({
+    account: { address: ua2Address, chainId: toolkit.chainId },
+    transport: ownerTransport,
+    ua2Address,
   });
-  assert.notEqual(bad.exitCode, 0, "Expected out-of-policy invoke to fail");
 
-  // 4) revoke → subsequent in-policy call must revert
-  hr("revoke_session");
-  await invoke("revoke_session", [SESSION_PUBKEY]);
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const validAfter = nowSeconds - 30;
+  const validUntil = validAfter + 2 * 60 * 60;
+  const sessionTargetValue =
+    optionalEnv(
+      ['UA2_DEVNET_SESSION_TARGET', 'UA2_SESSION_TARGET', 'UA2_E2E_TARGET_ADDR'],
+      toolkit.guardianAddress
+    ) ?? toolkit.guardianAddress;
+  const sessionTarget = toFelt(sessionTargetValue);
+  const transferSelector = selectorFor('transfer');
 
-  hr("in-policy call after revoke should REVERT");
-  const afterRevoke = await sncast({
-    args: [
-      "invoke",
-      "--address",
-      UA2_ADDR!,
-      "--function",
-      "try_transfer_mock",
-      "--calldata",
-      "0xCAFE",
-      "1",
-      "--max-fee",
-      "20000000000000000",
-    ],
-    expectOk: false,
+  const policy: SessionPolicyInput = {
+    validAfter,
+    validUntil,
+    limits: limits(1, 0),
+    allow: {
+      targets: [sessionTarget],
+      selectors: [transferSelector],
+    },
+    active: true,
+  };
+
+  console.log('\n[1] create tight session policy');
+  const session = await sessions.create(policy);
+  if (!ownerTransport.lastTxHash) {
+    throw new Error('add_session_with_allowlists did not emit a transaction hash');
+  }
+  const sessionReceipt = await waitForReceipt(
+    toolkit.provider,
+    ownerTransport.lastTxHash,
+    'create session',
+    RECEIPT_TIMEOUT_MS
+  );
+  assertSucceeded(sessionReceipt, 'create session');
+  logReceipt('create session', ownerTransport.lastTxHash, sessionReceipt);
+
+  const sessionKeyHash = deriveSessionKeyHash(session.pubkey);
+  console.log(`[ua2] session key hash ${sessionKeyHash}`);
+
+  let usage = initialSessionUsageState();
+
+  console.log('[2] in-policy session call succeeds');
+  usage = await expectSessionUsageSuccess(
+    toolkit,
+    ownerAccount,
+    ua2Address,
+    sessionKeyHash,
+    usage,
+    1,
+    'in-policy session call'
+  );
+
+  console.log('[3] out-of-policy session call reverts (ERR_POLICY_CALLCAP)');
+  await expectSessionUsageRevert(
+    toolkit,
+    ownerAccount,
+    ua2Address,
+    sessionKeyHash,
+    usage,
+    1,
+    'out-of-policy session call',
+    'ERR_POLICY_CALLCAP'
+  );
+
+  console.log('[4] revoke session');
+  const revokeTx = await ownerAccount.execute({
+    contractAddress: ua2Address,
+    entrypoint: 'revoke_session',
+    calldata: [sessionKeyHash],
   });
-  assert.notEqual(afterRevoke.exitCode, 0, "Expected revoked session invoke to fail");
+  const revokeReceipt = await waitForReceipt(
+    toolkit.provider,
+    revokeTx.transaction_hash,
+    'revoke session',
+    RECEIPT_TIMEOUT_MS
+  );
+  assertSucceeded(revokeReceipt, 'revoke session');
+  logReceipt('revoke session', revokeTx.transaction_hash, revokeReceipt);
 
-  console.log("\nE2E PASS ✅");
-})().catch((err) => {
-  console.error("\nE2E FAIL ❌");
-  console.error(err?.stack ?? String(err));
-  process.exit(1);
+  console.log('[5] session call after revoke reverts (ERR_SESSION_INACTIVE)');
+  await expectSessionUsageRevert(
+    toolkit,
+    ownerAccount,
+    ua2Address,
+    sessionKeyHash,
+    usage,
+    1,
+    'post-revoke session call',
+    'ERR_SESSION_INACTIVE'
+  );
+
+  console.log('\nUA² devnet e2e PASS ✅');
+}
+
+async function pickDeployment(
+  toolkit: Awaited<ReturnType<typeof setupToolkit>>,
+  envAddress?: string,
+  cachedAddress?: string
+): Promise<DeploymentInfo> {
+  if (envAddress) {
+    return ensureUa2Deployed(toolkit, envAddress);
+  }
+
+  if (cachedAddress) {
+    const attached = await ensureUa2Deployed(toolkit, cachedAddress);
+    if (attached.classHash !== '0x0') {
+      return attached;
+    }
+    console.warn('[ua2] cached UA² address missing on-chain class hash; redeploying');
+  }
+
+  console.log('[ua2] deploying UA² account to devnet…');
+  return ensureUa2Deployed(toolkit);
+}
+
+async function expectSessionUsageSuccess(
+  toolkit: Awaited<ReturnType<typeof setupToolkit>>,
+  owner: Account,
+  ua2Address: string,
+  sessionKeyHash: string,
+  state: ReturnType<typeof initialSessionUsageState>,
+  calls: number,
+  label: string
+) {
+  const { receipt, txHash } = await sendApplySessionUsage(
+    toolkit,
+    owner,
+    ua2Address,
+    sessionKeyHash,
+    state,
+    calls,
+    label
+  );
+  assertSucceeded(receipt, label);
+  logReceipt(label, txHash, receipt);
+  return updateSessionUsage(state, calls);
+}
+
+async function expectSessionUsageRevert(
+  toolkit: Awaited<ReturnType<typeof setupToolkit>>,
+  owner: Account,
+  ua2Address: string,
+  sessionKeyHash: string,
+  state: ReturnType<typeof initialSessionUsageState>,
+  calls: number,
+  label: string,
+  expectedReason: string
+): Promise<void> {
+  const { receipt, txHash } = await sendApplySessionUsage(
+    toolkit,
+    owner,
+    ua2Address,
+    sessionKeyHash,
+    state,
+    calls,
+    label
+  );
+  assertReverted(receipt, expectedReason, label);
+  logReceipt(label, txHash, receipt);
+}
+
+async function sendApplySessionUsage(
+  toolkit: Awaited<ReturnType<typeof setupToolkit>>,
+  owner: Account,
+  ua2Address: string,
+  sessionKeyHash: string,
+  state: ReturnType<typeof initialSessionUsageState>,
+  calls: number,
+  label: string
+) {
+  const tx = await owner.execute({
+    contractAddress: ua2Address,
+    entrypoint: 'apply_session_usage',
+    calldata: [
+      sessionKeyHash,
+      toFelt(state.callsUsed),
+      toFelt(calls),
+      toFelt(state.nonce),
+    ],
+  });
+  const receipt = await waitForReceipt(
+    toolkit.provider,
+    tx.transaction_hash,
+    label,
+    RECEIPT_TIMEOUT_MS
+  );
+  return { receipt, txHash: tx.transaction_hash };
+}
+
+async function readCachedAddresses(): Promise<DevnetAddresses | undefined> {
+  try {
+    const raw = await fsPromises.readFile(ADDRESSES_FILE, 'utf8');
+    const parsed = JSON.parse(raw) as Partial<DevnetAddresses>;
+    if (!parsed.ua2Address) return undefined;
+    return {
+      ua2Address: normalizeHex(parsed.ua2Address),
+      classHash: parsed.classHash ? normalizeHex(parsed.classHash) : '0x0',
+      network: parsed.network ?? 'devnet',
+      updatedAt: parsed.updatedAt ?? new Date().toISOString(),
+    };
+  } catch (err: any) {
+    if (err && (err as NodeJS.ErrnoException).code === 'ENOENT') {
+      return undefined;
+    }
+    throw err;
+  }
+}
+
+async function writeCachedAddresses(record: DevnetAddresses): Promise<void> {
+  await fsPromises.mkdir(path.dirname(ADDRESSES_FILE), { recursive: true });
+  await fsPromises.writeFile(
+    ADDRESSES_FILE,
+    `${JSON.stringify(record, null, 2)}\n`,
+    'utf8'
+  );
+}
+
+void main().catch((err) => {
+  console.error('\n[ua2] e2e devnet failed:', err);
+  process.exitCode = 1;
 });

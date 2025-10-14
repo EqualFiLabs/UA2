@@ -3,6 +3,7 @@ dist/
 coverage/
 .env
 .env.*
+!.env.sepolia
 !.env.example
 !.env.sepolia.example
 !packages/contracts/scripts/.env.sepolia.example

@@ -71,6 +71,20 @@ Goal: 6-minute live demo for judges
 
 ---
 
+## Demo Checklist (commands & expected output)
+
+| Step | Command | Expect |
+| --- | --- | --- |
+| Bootstrap env | `npm ci` | Installs workspaces without errors |
+| Devnet control run | `npm run e2e:devnet` | `E2E (devnet): … ✓` summary |
+| Sepolia sponsored run | `export $(grep -v '^#' .env.sepolia | xargs)`<br>`npm run e2e:sepolia` | `[paymaster] AVNU available …` and `UA² sepolia e2e PASS ✅` |
+| Fallback drill | `PAYMASTER_URL=http://127.0.0.1:9999 npm run e2e:sepolia` | `[paymaster] AVNU unavailable…` log + successful completion |
+| Front-end demo | `npm run dev --workspace @ua2/example` | Vite dev server prints local URL |
+
+Print the checklist and tick each row live while narrating the expected output to judges.
+
+---
+
 ## Appendix — Capturing the UI Screenshot
 - Run `npm install` from the monorepo root to ensure dependencies are present.
 - Start the Vite dev server with `npm run dev --workspace @ua2/example -- --host 0.0.0.0 --port 4173`.

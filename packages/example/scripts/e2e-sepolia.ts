@@ -1,5 +1,6 @@
-import { limits, makeSessionsManager, type SessionPolicyInput } from '@ua2/core';
-import { Account } from 'starknet';
+import { limits, makeSessionsManager, paymasters, type SessionPolicyInput } from '@ua2/core';
+import type { AvnuMode } from '@ua2/paymasters';
+import { Account, type Call } from 'starknet';
 
 import {
   AccountCallTransport,
@@ -19,11 +20,39 @@ import {
 } from './shared.js';
 
 const RECEIPT_TIMEOUT_MS = 240_000;
+const PAYMASTER_URL = process.env.PAYMASTER_URL ?? 'https://sepolia.paymaster.avnu.fi';
+const PAYMASTER_API_KEY = process.env.PAYMASTER_API_KEY;
+const GAS_TOKEN = process.env.GAS_TOKEN;
+const MODE_ENV = process.env.PM_MODE;
+const MODE: AvnuMode = MODE_ENV === 'default' ? 'default' : 'sponsored';
+
+let activePaymaster: ReturnType<typeof paymasters.avnu> | null = null;
+let paymasterSelection: 'avnu' | 'noop' = 'noop';
 
 async function main(): Promise<void> {
   console.log('[ua2] e2e sepolia (attach-only) starting');
 
   const toolkit = await setupToolkit('sepolia');
+
+  if (MODE === 'default' && !GAS_TOKEN) {
+    throw new Error('GAS_TOKEN is required when PM_MODE=default for AVNU paymaster usage.');
+  }
+
+  const noop = paymasters.noop();
+  const avnu = paymasters.avnu({
+    url: PAYMASTER_URL,
+    apiKey: PAYMASTER_API_KEY,
+    defaultGasToken: GAS_TOKEN,
+  });
+
+  if (await avnu.isAvailable()) {
+    console.log(`[paymaster] AVNU available at ${PAYMASTER_URL} using mode=${MODE}`);
+    activePaymaster = avnu;
+    paymasterSelection = 'avnu';
+  } else {
+    console.warn('[paymaster] AVNU unavailable, falling back to Noop (fees paid by user)');
+    console.warn(`[paymaster] fallback adapter: ${noop.name}`);
+  }
 
   const ua2AddressRaw = optionalEnv([
     'UA2_SEPOLIA_PROXY_ADDR',
@@ -202,7 +231,7 @@ async function sendApplySessionUsage(
   calls: number,
   label: string
 ) {
-  const tx = await owner.execute({
+  const call: Call = {
     contractAddress: ua2Address,
     entrypoint: 'apply_session_usage',
     calldata: [
@@ -211,14 +240,29 @@ async function sendApplySessionUsage(
       toFelt(calls),
       toFelt(state.nonce),
     ],
-  });
+  };
+
+  const txHash = await executeWithPaymaster(owner, call, label);
   const receipt = await waitForReceipt(
     toolkit.provider,
-    tx.transaction_hash,
+    txHash,
     label,
     RECEIPT_TIMEOUT_MS
   );
-  return { receipt, txHash: tx.transaction_hash };
+  return { receipt, txHash };
+}
+
+async function executeWithPaymaster(owner: Account, call: Call, label: string): Promise<string> {
+  if (paymasterSelection === 'avnu' && activePaymaster) {
+    const result = await activePaymaster.sponsor(owner, [call], MODE, GAS_TOKEN);
+    const hash = normalizeHex(result.transaction_hash);
+    console.log(`[paymaster] Sponsored tx sent: ${hash} (${label})`);
+    return hash;
+  }
+
+  console.log(`[paymaster] executing ${label} without sponsorship (Noop fallback)`);
+  const response = await owner.execute(call);
+  return normalizeHex(response.transaction_hash);
 }
 
 void main().catch((err) => {

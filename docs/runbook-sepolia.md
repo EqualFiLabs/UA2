@@ -160,6 +160,7 @@ sncast account deploy --name "$NAME" --url "$RPC"
 scarb manifest-path
 
 # 5. Declare the UA² class (bump --max-fee if sncast suggests a higher estimate)
+#    NOTE: `--contract-name UA2Account` is required so sncast locates the compiled class.
 sncast --account "$NAME" \
   declare \
   --contract-name UA2Account \
@@ -182,6 +183,7 @@ sncast --account "$NAME" \
 UA2_ADDR=0xPASTE_DEPLOYED_ADDRESS
 
 # 7. Smoke test – zero-arg view, so no --calldata flag required
+#    Passing `--calldata ""` will fail; omit the flag entirely for zero-arg reads.
 sncast --account "$NAME" \
   call \
   --contract-address "$UA2_ADDR" \
@@ -251,6 +253,7 @@ sncast account create --name "$NAME" --url "$RPC"
 sncast account deploy --name "$NAME" --url "$RPC"
 
 # 2. Declare the class (fees are in FRI/STRK; raise --max-fee if needed)
+#    `--contract-name UA2Account` must match the Scarb target.
 sncast --account "$NAME" \
   declare \
   --contract-name UA2Account \
@@ -271,6 +274,7 @@ sncast --account "$NAME" \
 UA2_PROXY_ADDR=0xDEPLOYED_ADDRESS
 
 # 4. Verify with a read-only call (no calldata flag for zero-arg functions)
+#    Leave `--calldata` off entirely when the selector takes no arguments.
 sncast --account "$NAME" \
   call \
   --contract-address "$UA2_PROXY_ADDR" \
@@ -339,17 +343,46 @@ If the contract checks revert, verify you supplied proper calldata as per `docs/
 
 ---
 
-## 8) Paymaster wiring (optional in hackathon)
+## 8) Paymaster wiring (AVNU on Sepolia)
 
-If you have a paymaster provider:
+AVNU exposes a Starknet paymaster RPC that supports sponsored (gasless) and token-fee modes.
 
-```bash
-# In JS SDK usage (example):
-# UA2.paymasters.from('starknet-react:<provider>') or custom adapter
-npm run test --workspace @ua2/paymasters
+1. Copy the template and export it:
+
+   ```bash
+   cp .env.sepolia.example .env.sepolia
+   export $(grep -v '^#' .env.sepolia | xargs)
+   ```
+
+2. Fill in `STARKNET_RPC_URL`, `UA2_ADDR`, and the paymaster fields:
+
+   ```env
+   PAYMASTER_URL=https://sepolia.paymaster.avnu.fi
+   PAYMASTER_API_KEY=<optional>
+   PM_MODE=sponsored   # or default
+   GAS_TOKEN=0x<ERC20> # required when PM_MODE=default
+   ```
+
+3. Run the Sepolia script:
+
+   ```bash
+   npm run e2e:sepolia
+   ```
+
+Expected output highlights:
+
+```
+[paymaster] AVNU available at https://sepolia.paymaster.avnu.fi using mode=sponsored
+[paymaster] Sponsored tx sent: 0x<hash> (in-policy session call)
+UA² sepolia e2e PASS ✅
 ```
 
-Expected: Sponsored tx succeeds; negative-path test shows a clear error.
+If AVNU is temporarily unavailable, override `PAYMASTER_URL` with an invalid value to confirm the fallback path:
+
+```
+[paymaster] AVNU unavailable, falling back to Noop (fees paid by user)
+[paymaster] executing in-policy session call without sponsorship (Noop fallback)
+```
 
 ---
 

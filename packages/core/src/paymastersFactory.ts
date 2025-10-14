@@ -4,13 +4,13 @@ import type { Paymaster } from './types';
 
 class CartridgePaymaster extends NoopPaymaster {
   constructor(tag?: string) {
-    super(tag ? `cartridge:${tag}` : 'cartridge');
+    super({ name: tag ? `cartridge:${tag}` : 'cartridge' });
   }
 }
 
 class StarknetReactPaymaster extends NoopPaymaster {
   constructor(tag?: string) {
-    super(tag ? `starknet-react:${tag}` : 'starknet-react');
+    super({ name: tag ? `starknet-react:${tag}` : 'starknet-react' });
   }
 }
 
@@ -29,7 +29,7 @@ export function paymasterFrom(id: string): Paymaster {
 
   switch (base) {
     case 'noop':
-      return new NoopPaymaster(tag ? `noop:${tag}` : 'noop');
+      return new NoopPaymaster({ name: tag ? `noop:${tag}` : 'noop' });
     case 'cartridge':
       return new CartridgePaymaster(tag);
     case 'starknet-react':

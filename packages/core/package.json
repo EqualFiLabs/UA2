@@ -18,6 +18,9 @@
     "lint": "eslint .",
     "test": "vitest run --run"
   },
+  "dependencies": {
+    "@ua2/paymasters": "file:../paymasters"
+  },
   "devDependencies": {
     "typescript": "^5.5.4",
     "vitest": "^1.6.0",

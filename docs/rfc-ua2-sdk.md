@@ -93,7 +93,7 @@ This RFC proposes a neutral, modular SDK that standardizes these primitives with
 
 1. **Account module** ships with:
 
-   * `SessionKeys`: add/list/revoke; constraints: `functionSelectors[]`, `targetContracts[]`, `maxCalls`, `maxValuePerCall`, `expiresAt`, `nonceSalt`; emits events; enforced in `__validate__`.
+* `SessionKeys`: add/list/revoke; constraints: `functionSelectors[]`, `targetContracts[]`, `maxCalls`, `maxValuePerCall`, `valid_after`, `valid_until`, `nonceSalt`; emits events; enforced in `__validate__`.
    * `Guardians`: `addGuardian`, `removeGuardian`, `proposeRecovery`, `confirmRecovery`, `executeRecovery` after `recoveryDelay`, threshold `m-of-n`.
    * `KeyRotation`: owner rotate with optional guardian assist; emits `OwnerRotated`.
 2. **SDK**:
@@ -207,14 +207,7 @@ event RecoveryExecuted(new_owner: felt252);
 
 * `@ua2/core` — wallet abstraction (starknet.js), session manager, policy builder, paymaster adapters. ([starknetjs.com][3])
 * `@ua2/react` — hooks (`useAccount`, `useSessions`, `usePaymaster`).
-* `@ua2/paymasters` — adapters implementing a common interface:
-
-  ```ts
-  export interface Paymaster {
-    name: string;
-    sponsor(tx: AccountTransaction): Promise<SponsoredTx>;
-  }
-  ```
+* `@ua2/paymasters` — adapters implementing a common interface, including `NoopPaymaster` for devnet and `AvnuPaymaster` for Sepolia sponsorship (`sponsored` and token-fee `default` modes).
 
   Provide examples wired to **starknet.js PaymasterInterface** and **Starknet React paymaster providers**. ([starknetjs.com][5])
 * `@ua2/contracts` — Cairo artifacts + deploy script.
@@ -227,17 +220,29 @@ const ua = await UA2.connect({ preferred: ['argent', 'braavos', 'cartridge'] });
 
 // create a session
 const sess = await ua.sessions.create({
+  validAfter: Math.floor(Date.now() / 1000),
+  validUntil: nowPlusHours(8),
   allow: {
     targets: [erc20.address],
     selectors: [erc20.interface.getFunction('transfer').selector],
   },
   limits: { maxCalls: 50, maxValuePerCall: toUint256('10000000000000000') }, // 0.01 ETH
-  expiresAt: nowPlusHours(8),
+<<<<<<< ours
+  validAfter: Date.now() / 1000,
+  validUntil: Date.now() / 1000 + 8 * 3600,
+=======
+>>>>>>> theirs
 });
 
 // use a paymaster
-const sponsor = UA2.paymasters.from('starknet-react:xyz'); // adapter
-const tx = await ua.withPaymaster(sponsor).call(contract, 'doThing', args);
+const transport = /* CallTransport wired to your Account */;
+const avnu = UA2.paymasters.avnu({ url: 'https://sepolia.paymaster.avnu.fi' });
+if (await avnu.isAvailable()) {
+  await avnu.sponsor(account, calls, 'sponsored');
+} else {
+  const runner = ua.withPaymaster(UA2.paymasters.noop(), { ua2Address: account.address, transport });
+  const tx = await runner.call(contract.address, contract.selector('doThing'), args);
+}
 
 // revoke
 await ua.sessions.revoke(sess.id);
@@ -330,6 +335,8 @@ event GuardianRemoved(addr: ContractAddress);
 event ThresholdSet(threshold: u8);
 event RecoveryDelaySet(delay: u64);
 event OwnerRotated(new_owner: felt252);
+event GuardianProposed(guardian: ContractAddress, proposal_id: u64, new_owner: felt252, eta: u64);
+event GuardianFinalized(guardian: ContractAddress, proposal_id: u64, new_owner: felt252);
 event RecoveryProposed(new_owner: felt252, eta: u64);
 event RecoveryConfirmed(guardian: ContractAddress, new_owner: felt252, count: u32);
 event RecoveryCanceled();
@@ -340,15 +347,25 @@ event RecoveryExecuted(new_owner: felt252);
 
 * `ERR_SESSION_EXPIRED`
 * `ERR_SESSION_INACTIVE`
+* `ERR_SESSION_STALE`
+* `ERR_SESSION_NOT_READY`
+* `ERR_SESSION_TARGETS_LEN`
+* `ERR_SESSION_SELECTORS_LEN`
 * `ERR_POLICY_CALLCAP`
 * `ERR_POLICY_SELECTOR_DENIED`
 * `ERR_POLICY_TARGET_DENIED`
-* `ERR_VALUE_LIMIT_EXCEEDED`
 * `ERR_POLICY_CALLCOUNT_MISMATCH`
+* `ERR_VALUE_LIMIT_EXCEEDED`
 * `ERR_BAD_SESSION_NONCE`
+* `ERR_BAD_VALID_WINDOW`
+* `ERR_BAD_MAX_CALLS`
 * `ERR_SESSION_SIG_INVALID`
+* `ERR_SIGNATURE_MISSING`
+* `ERR_OWNER_SIG_INVALID`
+* `ERR_GUARDIAN_SIG_INVALID`
 * `ERR_GUARDIAN_EXISTS`
 * `ERR_NOT_GUARDIAN`
+* `ERR_GUARDIAN_CALL_DENIED`
 * `ERR_BAD_THRESHOLD`
 * `ERR_RECOVERY_IN_PROGRESS`
 * `ERR_NO_RECOVERY`
@@ -356,8 +373,10 @@ event RecoveryExecuted(new_owner: felt252);
 * `ERR_ALREADY_CONFIRMED`
 * `ERR_BEFORE_ETA`
 * `ERR_NOT_ENOUGH_CONFIRMS`
+* `ERR_NOT_OWNER`
 * `ERR_ZERO_OWNER`
 * `ERR_SAME_OWNER`
+* `ERR_UNSUPPORTED_AUTH_MODE`
 
 ---
 

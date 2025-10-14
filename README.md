@@ -60,18 +60,60 @@ scarb build
 > [mise](https://mise.jdx.dev/). If `scarb` is not on your `PATH`, install the pinned version with
 > `mise install scarb@2.12.0` (or ensure `/root/.asdf/shims` is exported when using `asdf`).
 
-### 3. Deploy to Sepolia
+### 3. Declare & deploy with `sncast`
+
+Mirror the same workflow locally and on Sepolia so copy/pasting always works. Replace the
+placeholders (`<...>`) before running.
 
 ```bash
 # still inside packages/contracts
-export STARKNET_RPC_URL=<YOUR_SEPOLIA_RPC>
-export UA2_OWNER_PUBKEY=<OWNER_PUBKEY_FELT>
-./scripts/deploy_ua2.sh
+
+# Devnet example (see docs/runbook-sepolia.md for full flow)
+RPC=http://127.0.0.1:5050
+NAME=devnet
+
+sncast account create --name "$NAME" --url "$RPC"
+sncast account deploy --name "$NAME" --url "$RPC"
+
+sncast --account "$NAME" \
+  declare \
+  --contract-name UA2Account \
+  --url "$RPC" \
+  --max-fee 9638049920000000000
+
+UA2_CLASS_HASH=0xCLASS_HASH_FROM_OUTPUT
+
+OWNER_PUBKEY=0xYOUR_OWNER_FELT
+sncast --account "$NAME" \
+  deploy \
+  --class-hash "$UA2_CLASS_HASH" \
+  --constructor-calldata "$OWNER_PUBKEY" \
+  --url "$RPC" \
+  --max-fee 9638049920000000000
+
+UA2_PROXY_ADDR=0xDEPLOYED_ADDRESS
+
+sncast --account "$NAME" \
+  call \
+  --contract-address "$UA2_PROXY_ADDR" \
+  --function get_owner \
+  --url "$RPC"
+
+# Sepolia mirrors the same steps; just switch RPC/NAME and fund the account with STRK (FRI)
+RPC=https://starknet-sepolia.infura.io/v3/<YOUR_KEY>
+NAME=sepolia
 ```
 
-The helper script declares the class if needed and writes `UA2_CLASS_HASH`, `UA2_IMPLEMENTATION_ADDR`,
-and `UA2_PROXY_ADDR` to `packages/contracts/.ua2-sepolia-addresses.json`. Copy the relevant values into
-your `.env.sepolia` (created from `.env.sepolia.example`) and set `NEXT_PUBLIC_UA2_PROXY_ADDR` for the demo app.
+If `sncast` reports "fee too low", rerun the declare/deploy with the suggested higher
+`--max-fee` (fees are denominated in **FRI (STRK)**). Copy the resulting class hash,
+implementation hash, and proxy address into `.env` / `.env.sepolia` so the SDK and demo app
+point at the correct contracts. `./scripts/deploy_ua2.sh` is still available when you want an
+automated run.
+
+> [!NOTE]
+> On devnet, mint FRI to the printed account address via `devnet_mint`. On Sepolia,
+> top up the account with STRK/ETH from your faucet or bridge of choice before
+> deploying.
 
 ### 4. Run demo app
 
@@ -114,6 +156,10 @@ For full walkthrough: [`docs/runbook-sepolia.md`](./docs/runbook-sepolia.md)
   ```bash
   npm run e2e:devnet
   ```
+
+  > [!TIP]
+  > Use the devnet + `sncast` recipe in [`docs/runbook-sepolia.md`](./docs/runbook-sepolia.md) to
+  > create/fund the named account and deploy the UA² class before running the suite.
 * **E2E on Sepolia:**
 
   ```bash

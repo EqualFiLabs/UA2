@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { NoopPaymaster, PaymasterDeniedError } from '../src/index.js';
+import {
+  type AccountTransaction,
+  NoopPaymaster,
+  PaymasterDeniedError,
+} from '../src/index.js';
 
-const BASE_TX = {
+const BASE_TX: AccountTransaction = {
   calls: [
     {
       to: '0xCA11',
@@ -9,7 +13,7 @@ const BASE_TX = {
       calldata: ['0x1', '0x2'],
     },
   ],
-} as const;
+};
 
 describe('NoopPaymaster', () => {
   it('decorates the transaction when within limits', async () => {

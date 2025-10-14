@@ -75,15 +75,14 @@ describe('Sessions API', () => {
     expect(call.entry).toBe('add_session_with_allowlists');
 
     const data = call.data;
-    expect(data[1]).toBe('0x1'); // active flag
-    expect(data.slice(1, 8)).toEqual([
+    expect(data[0]).toBe(data[1]); // session id mirrors pubkey
+    expect(data.slice(2, 8)).toEqual([
       '0x1',
       '0x0',
       '0x70962838',
       '0x3',
       '0x0',
       '0x10',
-      '0x0',
     ]);
     expect(data[8]).toBe('0x2');
     expect(data.slice(9, 11)).toEqual(['0xdead', '0xbeef']);

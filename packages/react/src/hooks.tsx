@@ -4,6 +4,7 @@ import {
   NoopPaymaster,
   type AccountCall,
   type CallTransport,
+  type ConnectOptions,
   type Felt,
   type Paymaster,
   type Session,
@@ -19,11 +20,12 @@ export function useAccount(): {
   client: UA2Client | null;
   address: Felt | null;
   error: Error | null;
+  connect: (opts: ConnectOptions) => Promise<UA2Client>;
   disconnect: () => Promise<void>;
 } {
-  const { status, client, error, disconnect } = useUA2();
+  const { status, client, error, connect, disconnect } = useUA2();
   const address = client?.address ?? null;
-  return { status, client, address, error, disconnect };
+  return { status, client, address, error, connect, disconnect };
 }
 
 /* ------------------ useSessions ------------------ */

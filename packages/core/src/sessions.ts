@@ -53,7 +53,7 @@ class SessionsImpl implements SessionsManager {
 
     // Build calldata for Cairo's SessionPolicy struct and allowlists.
     const { policyCalldata, allowCalldata } = buildPolicyCalldata(resolved);
-    const calldata = buildAddSessionCalldata(pubkey, policyCalldata, allowCalldata);
+    const calldata = buildAddSessionCalldata(sessionId, pubkey, policyCalldata, allowCalldata);
 
     // If we have a transport + ua2 address, we could call add_session_with_allowlists here.
     // Keeping it local-only for now (no RPC in tests).
@@ -153,6 +153,7 @@ function buildPolicyCalldata(policy: SessionPolicyResolved): {
 }
 
 function buildAddSessionCalldata(
+  sessionId: Felt,
   pubkey: Felt,
   policy: SessionPolicyCalldata,
   allow: { targets: Felt[]; selectors: Felt[] }
@@ -164,13 +165,13 @@ function buildAddSessionCalldata(
     policy.max_calls,
     policy.calls_used,
     policy.max_value_per_call_low,
-    policy.max_value_per_call_high,
   ];
 
   const targetsLen = toFelt(allow.targets.length);
   const selectorsLen = toFelt(allow.selectors.length);
 
   return [
+    sessionId,
     pubkey,
     ...policyArray,
     targetsLen,

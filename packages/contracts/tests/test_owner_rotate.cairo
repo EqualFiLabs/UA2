@@ -179,7 +179,7 @@ fn non_owner_cannot_rotate() {
 }
 
 #[test]
-fn sessions_are_invalidated_on_owner_rotation() {
+fn test_rotate_owner_revokes_sessions() {
     let (account_address, mock_address) = deploy_account_and_mock();
 
     let session_pubkey = session_key();

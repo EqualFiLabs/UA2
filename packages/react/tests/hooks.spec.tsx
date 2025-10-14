@@ -64,7 +64,8 @@ function Demo() {
       <button
         onClick={async () => {
           await sessions.create({
-            expiresAt: 1_800_000_000,
+            validAfter: 0,
+            validUntil: 1_800_000_000,
             limits: { maxCalls: 1, maxValuePerCall: ['0x0', '0x0'] },
             allow: { targets: [], selectors: [] },
             active: true,

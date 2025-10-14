@@ -17,7 +17,8 @@ describe('Sessions API', () => {
     const client = await connect(baseOpts);
 
     const pol: SessionPolicyInput = {
-      expiresAt: 1_700_000_000, // seconds
+      validAfter: 0,
+      validUntil: 1_700_000_000, // seconds
       limits: limits(10, '10000000000000000'), // 0.01 ETH-ish
       allow: {
         targets: ['0xDEAD', '0xBEEF'],
@@ -56,7 +57,8 @@ describe('Sessions API', () => {
     });
 
     const policy: SessionPolicyInput = {
-      expiresAt: 1_888_888_888,
+      validAfter: 0,
+      validUntil: 1_888_888_888,
       limits: limits(3, '0x10'),
       allow: {
         targets: ['0xDEAD', '0xBEEF'],
@@ -92,7 +94,8 @@ describe('Sessions API', () => {
     const client = await connect(baseOpts);
 
     const s = await client.sessions.create({
-      expiresAt: 1_800_000_000,
+      validAfter: 0,
+      validUntil: 1_800_000_000,
       limits: limits(1, 0),
       allow: { targets: [], selectors: [] },
       active: true
@@ -132,7 +135,8 @@ describe('Sessions API', () => {
     await expect(useSession(client.sessions, session.id)).rejects.toBeInstanceOf(SessionExpiredError);
 
     const expired = await client.sessions.create({
-      expiresAt: Math.floor(Date.now() / 1000) - 1,
+      validAfter: 0,
+      validUntil: Math.floor(Date.now() / 1000) - 1,
       limits: limits(1, 0),
       allow: { targets: [], selectors: [] },
       active: true,
@@ -151,6 +155,6 @@ describe('Sessions API', () => {
     expect(policy.allow.selectors).toContain('0x2');
     expect(policy.limits.maxCalls).toBeGreaterThanOrEqual(1);
     expect(policy.limits.maxValuePerCall[0]).toBeDefined();
-    expect(policy.expiresAt).toBeGreaterThan(Math.floor(Date.now() / 1000));
+    expect(policy.validUntil).toBeGreaterThan(Math.floor(Date.now() / 1000));
   });
 });

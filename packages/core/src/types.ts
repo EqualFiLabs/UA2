@@ -113,6 +113,8 @@ export interface SessionPolicyInput {
   allow: SessionAllow;
   /** Whether the session is active on creation. Default true. */
   active?: boolean;
+  /** Number of calls already consumed by this session (mirrors on-chain `calls_used`). */
+  callsUsed?: number;
 }
 
 /** The on-chain policy struct shape (Cairo ordering). */
@@ -127,6 +129,22 @@ export interface SessionPolicyCalldata {
   // Arrays come separately as (len, items...)
 }
 
+/** Cairo struct with native JS types for ergonomics. */
+export interface SessionPolicyStruct {
+  is_active: boolean;
+  valid_after: number;
+  valid_until: number;
+  max_calls: number;
+  calls_used: number;
+  max_value_per_call: Uint256;
+}
+
+/** Session policy resolved with defaults and counters for local mirrors. */
+export interface SessionPolicyResolved extends SessionPolicyInput {
+  active: boolean;
+  callsUsed: number;
+}
+
 /** Returned by SDK when you create a session. */
 export interface Session {
   /** Internal id = keyHash felt (same as supplied key or its hash). */
@@ -134,7 +152,7 @@ export interface Session {
   /** Public session key felt (simplified for now). */
   pubkey: Felt;
   /** Policy you requested. */
-  policy: SessionPolicyInput;
+  policy: SessionPolicyResolved;
   /** Created at (ms). */
   createdAt: number;
 }
@@ -147,6 +165,8 @@ export interface SessionsManager {
   revoke(sessionId: Felt): Promise<void>;
   /** List locally known sessions. */
   list(): Promise<Session[]>;
+  /** Load and validate a session for client-side policy enforcement. */
+  use(sessionId: Felt, opts?: SessionUseOptions): Promise<SessionUsage>;
 }
 
 /* ------------------ Transport Abstraction (stub) ------------------ */
@@ -197,6 +217,19 @@ export interface PaymasterContext {
   transport?: CallTransport;
   ua2Address?: Felt;
   entrypoint?: string;
+}
+
+/* ------------------ Session usage helpers ------------------ */
+
+export interface SessionUseOptions {
+  /** Override "now" in milliseconds (defaults to Date.now()). */
+  now?: number;
+}
+
+export interface SessionUsage {
+  session: Session;
+  /** Ensure the provided calls comply with the session policy. */
+  ensureAllowed(calls: AccountCall[] | AccountCall): void;
 }
 
 export interface PaymasterRunner {

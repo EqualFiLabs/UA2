@@ -75,9 +75,10 @@ describe('Sessions API', () => {
     expect(call.entry).toBe('add_session_with_allowlists');
 
     const data = call.data;
-    expect(data[0]).toBe(data[1]);
-    expect(data.slice(2, 8)).toEqual([
+    expect(data[1]).toBe('0x1'); // active flag
+    expect(data.slice(1, 8)).toEqual([
       '0x1',
+      '0x0',
       '0x70962838',
       '0x3',
       '0x0',
@@ -123,10 +124,13 @@ describe('Sessions API', () => {
     }).build();
 
     const session = await client.sessions.create(policy);
-    const usage = await useSession(client.sessions, session.id);
+    const usage = await client.sessions.use(session.id);
     expect(usage.session.id).toBe(session.id);
 
     expect(() => usage.ensureAllowed(allowedCall)).not.toThrow();
+    usage.session.policy.callsUsed = usage.session.policy.limits.maxCalls;
+    expect(() => usage.ensureAllowed(allowedCall)).toThrowError(PolicyViolationError);
+    usage.session.policy.callsUsed = 0;
     expect(() =>
       usage.ensureAllowed({ ...allowedCall, to: '0xBEEF' })
     ).toThrowError(PolicyViolationError);

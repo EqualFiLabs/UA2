@@ -6,9 +6,13 @@ import type {
   Session,
   SessionPolicyCalldata,
   SessionPolicyInput,
+  SessionPolicyResolved,
+  SessionPolicyStruct,
+  SessionLimits,
+  SessionUsage,
+  SessionUseOptions,
   SessionsManager,
   UA2AccountLike,
-  Uint256,
 } from './types';
 import { toUint256 } from './utils/u256';
 import { toFelt } from './utils/felt';
@@ -42,13 +46,13 @@ class SessionsImpl implements SessionsManager {
   }
 
   async create(policy: SessionPolicyInput): Promise<Session> {
-    const active = policy.active ?? true;
+    const resolved = resolvePolicy(policy);
     const pubkey = genFeltKey();
     const sessionId = pubkey; // v0.1: use felt pubkey directly; can hash later
     const createdAt = Date.now();
 
     // Build calldata for Cairo's SessionPolicy struct and allowlists.
-    const { policyCalldata, allowCalldata } = buildPolicyCalldata(policy, active);
+    const { policyCalldata, allowCalldata } = buildPolicyCalldata(resolved);
     const calldata = buildAddSessionCalldata(pubkey, policyCalldata, allowCalldata);
 
     // If we have a transport + ua2 address, we could call add_session_with_allowlists here.
@@ -60,7 +64,7 @@ class SessionsImpl implements SessionsManager {
     const sess: Session = {
       id: sessionId,
       pubkey,
-      policy,
+      policy: resolved,
       createdAt,
     };
     this.sessions.push(sess);
@@ -79,41 +83,73 @@ class SessionsImpl implements SessionsManager {
     // Return a shallow copy for immutability.
     return [...this.sessions];
   }
+
+  async use(sessionId: Felt, opts?: SessionUseOptions): Promise<SessionUsage> {
+    return useSession(this, sessionId, opts);
+  }
 }
 
 /* ------------------ Policy / Calldata helpers ------------------ */
 
-function buildPolicyCalldata(inp: SessionPolicyInput, active: boolean): {
+function resolvePolicy(inp: SessionPolicyInput): SessionPolicyResolved {
+  const validAfter = Math.max(0, Math.floor(inp.validAfter));
+  const rawValidUntil = Math.max(0, Math.floor(inp.validUntil));
+  const validUntil = rawValidUntil <= validAfter ? validAfter + 1 : rawValidUntil;
+  const active = inp.active ?? true;
+  const callsUsed = Math.max(0, Math.floor(inp.callsUsed ?? 0));
+  const maxCalls = Math.max(0, Math.floor(inp.limits.maxCalls));
+  const [maxLow, maxHigh] = inp.limits.maxValuePerCall;
+
+  return {
+    ...inp,
+    validAfter,
+    validUntil,
+    limits: {
+      maxCalls,
+      maxValuePerCall: [toFelt(maxLow), toFelt(maxHigh)],
+    },
+    allow: {
+      targets: [...(inp.allow.targets ?? [])],
+      selectors: [...(inp.allow.selectors ?? [])],
+    },
+    active,
+    callsUsed,
+  };
+}
+
+function buildPolicyCalldata(policy: SessionPolicyResolved): {
+  policyStruct: SessionPolicyStruct;
   policyCalldata: SessionPolicyCalldata;
   allowCalldata: {
     targets: Felt[];
     selectors: Felt[];
   };
 } {
-  const rawValidAfter = Math.max(0, Math.floor(inp.validAfter));
-  const rawValidUntil = Math.max(0, Math.floor(inp.validUntil));
-  const normalizedValidUntil = rawValidUntil <= rawValidAfter ? rawValidAfter + 1 : rawValidUntil;
-  const valid_after = toFelt(BigInt(rawValidAfter));
-  const valid_until = toFelt(BigInt(normalizedValidUntil));
-  const max_calls = toFelt(inp.limits.maxCalls >>> 0);
-  const calls_used = toFelt(0);
-  const [low, high] = inp.limits.maxValuePerCall;
-  const is_active = toFelt(active ? 1 : 0);
-
-  const policyCalldata: SessionPolicyCalldata = {
-    is_active,
-    valid_after,
-    valid_until,
-    max_calls,
-    calls_used,
-    max_value_per_call_low: low,
-    max_value_per_call_high: high,
+  const policyStruct: SessionPolicyStruct = {
+    is_active: policy.active,
+    valid_after: policy.validAfter,
+    valid_until: policy.validUntil,
+    max_calls: policy.limits.maxCalls,
+    calls_used: policy.callsUsed,
+    max_value_per_call: policy.limits.maxValuePerCall,
   };
 
-  const targets = (inp.allow.targets ?? []).map(toFelt);
-  const selectors = (inp.allow.selectors ?? []).map(toFelt);
+  const [low, high] = policyStruct.max_value_per_call;
 
-  return { policyCalldata, allowCalldata: { targets, selectors } };
+  const policyCalldata: SessionPolicyCalldata = {
+    is_active: toFelt(policyStruct.is_active ? 1 : 0),
+    valid_after: toFelt(BigInt(policyStruct.valid_after)),
+    valid_until: toFelt(BigInt(policyStruct.valid_until)),
+    max_calls: toFelt(policyStruct.max_calls >>> 0),
+    calls_used: toFelt(policyStruct.calls_used >>> 0),
+    max_value_per_call_low: toFelt(low),
+    max_value_per_call_high: toFelt(high),
+  };
+
+  const targets = (policy.allow.targets ?? []).map(toFelt);
+  const selectors = (policy.allow.selectors ?? []).map(toFelt);
+
+  return { policyStruct, policyCalldata, allowCalldata: { targets, selectors } };
 }
 
 function buildAddSessionCalldata(
@@ -122,9 +158,11 @@ function buildAddSessionCalldata(
   allow: { targets: Felt[]; selectors: Felt[] }
 ): Felt[] {
   const policyArray: Felt[] = [
+    policy.is_active,
     policy.valid_after,
     policy.valid_until,
     policy.max_calls,
+    policy.calls_used,
     policy.max_value_per_call_low,
     policy.max_value_per_call_high,
   ];
@@ -143,25 +181,11 @@ function buildAddSessionCalldata(
 }
 
 /** Convenience builder for users: encode numeric string amount as Uint256. */
-export function limits(maxCalls: number, maxValue: string | number | bigint): {
-  maxCalls: number;
-  maxValuePerCall: Uint256;
-} {
+export function limits(maxCalls: number, maxValue: string | number | bigint): SessionLimits {
   return { maxCalls, maxValuePerCall: toUint256(maxValue) };
 }
 
 /* ------------------ Session helpers ------------------ */
-
-export interface SessionUseOptions {
-  /** Override "now" in milliseconds (defaults to Date.now()). */
-  now?: number;
-}
-
-export interface SessionUsage {
-  session: Session;
-  /** Ensure the provided calls comply with the session policy. */
-  ensureAllowed(calls: AccountCall[] | AccountCall): void;
-}
 
 export async function useSession(
   manager: SessionsManager,
@@ -207,8 +231,11 @@ function ensureSessionActive(session: Session, nowMs?: number) {
 function ensurePolicy(session: Session, calls: AccountCall[]) {
   const { allow, limits } = session.policy;
 
-  if (calls.length > limits.maxCalls) {
-    throw new PolicyViolationError('calls', `${calls.length} > ${limits.maxCalls}`);
+  if (session.policy.callsUsed + calls.length > limits.maxCalls) {
+    throw new PolicyViolationError(
+      'calls',
+      `${session.policy.callsUsed + calls.length} > ${limits.maxCalls}`
+    );
   }
 
   const allowedTargets = new Set((allow.targets ?? []).map((t) => toFelt(t)));
@@ -323,6 +350,7 @@ export function guard(init: GuardBuilderInit = {}): GuardBuilder {
           selectors: Array.from(selectors),
         },
         active: isActive,
+        callsUsed: 0,
       };
     },
   };

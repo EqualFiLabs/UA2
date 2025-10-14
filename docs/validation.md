@@ -17,7 +17,8 @@
 7. For each call in `tx.multicall`:
    - Assert target allowlist entry is `true` (`ERR_POLICY_TARGET_DENIED`).
    - Assert selector allowlist entry is `true` (`ERR_POLICY_SELECTOR_DENIED`).
-   - If selector == `ERC20::transfer`, ensure amount ≤ `max_value_per_call` (`ERR_VALUE_LIMIT_EXCEEDED`).
+   - If selector == `ERC20::transfer` **or** `ERC20::transferFrom`, ensure amount ≤ `max_value_per_call` (`ERR_VALUE_LIMIT_EXCEEDED`).
+   - Direct native-token `call.value` transfers are out-of-scope in v0; stick to ERC-20 flows when using value caps.
 8. Require provided session nonce == stored nonce (`ERR_BAD_SESSION_NONCE`).
 9. Verify ECDSA signature against the computed session message (`ERR_SESSION_SIG_INVALID`).
    - Message binds `{chainId, accountAddress, sessionPubkey, callHash, validUntil, nonce}` to prevent cross-channel replay.

@@ -21,10 +21,10 @@ pub mod UA2Account {
         get_execution_info,
     };
     use crate::errors::{
-        ERR_ALREADY_CONFIRMED, ERR_BAD_SESSION_NONCE, ERR_BAD_THRESHOLD, ERR_BEFORE_ETA,
-        ERR_GUARDIAN_CALL_DENIED, ERR_GUARDIAN_EXISTS, ERR_GUARDIAN_SIG_INVALID,
-        ERR_NOT_ENOUGH_CONFIRMS, ERR_NOT_GUARDIAN, ERR_NOT_OWNER, ERR_NO_RECOVERY,
-        ERR_OWNER_SIG_INVALID, ERR_POLICY_CALLCAP, ERR_POLICY_CALLCOUNT_MISMATCH,
+        ERR_ALREADY_CONFIRMED, ERR_BAD_MAX_CALLS, ERR_BAD_SESSION_NONCE, ERR_BAD_THRESHOLD,
+        ERR_BAD_VALID_WINDOW, ERR_BEFORE_ETA, ERR_GUARDIAN_CALL_DENIED, ERR_GUARDIAN_EXISTS,
+        ERR_GUARDIAN_SIG_INVALID, ERR_NOT_ENOUGH_CONFIRMS, ERR_NOT_GUARDIAN, ERR_NOT_OWNER,
+        ERR_NO_RECOVERY, ERR_OWNER_SIG_INVALID, ERR_POLICY_CALLCAP, ERR_POLICY_CALLCOUNT_MISMATCH,
         ERR_POLICY_SELECTOR_DENIED, ERR_POLICY_TARGET_DENIED, ERR_RECOVERY_IN_PROGRESS,
         ERR_RECOVERY_MISMATCH, ERR_SAME_OWNER, ERR_SESSION_EXPIRED, ERR_SESSION_INACTIVE,
         ERR_SESSION_NOT_READY, ERR_SESSION_SELECTORS_LEN, ERR_SESSION_SIG_INVALID,
@@ -39,6 +39,7 @@ pub mod UA2Account {
 
     const ERC20_TRANSFER_SEL: felt252 =
         0x83afd3f4caedc6eebf44246fe54e38c95e3179a5ec9ea81740eca5b482d12e;
+    const ERC20_TRANSFER_FROM_SEL: felt252 = starknet::selector!("transferFrom");
     const APPLY_SESSION_USAGE_SELECTOR: felt252 = starknet::selector!("apply_session_usage");
     const PROPOSE_RECOVERY_SELECTOR: felt252 = starknet::selector!("propose_recovery");
     const CONFIRM_RECOVERY_SELECTOR: felt252 = starknet::selector!("confirm_recovery");
@@ -546,8 +547,8 @@ pub mod UA2Account {
         fn add_session(ref self: ContractState, key: felt252, mut policy: SessionPolicy) {
             assert_owner();
 
-            assert(policy.valid_until > policy.valid_after, 'BAD_VALID_WINDOW');
-            assert(policy.max_calls > 0_u32, 'BAD_MAX_CALLS');
+            assert(policy.valid_until > policy.valid_after, ERR_BAD_VALID_WINDOW);
+            assert(policy.max_calls > 0_u32, ERR_BAD_MAX_CALLS);
 
             let key_hash = derive_key_hash(key);
 
@@ -606,6 +607,39 @@ pub mod UA2Account {
         let sum = lhs + rhs;
         assert(sum >= lhs, ERR_POLICY_CALLCAP);
         sum
+    }
+
+    fn enforce_value_limit(calldata: Span<felt252>, amount_index: usize, limit: u256) {
+        let required_len = amount_index + 2_usize;
+        let calldata_len = calldata.len();
+        require(calldata_len >= required_len, ERR_VALUE_LIMIT_EXCEEDED);
+
+        let amount_low_felt = *calldata.at(amount_index);
+        let amount_high_felt = *calldata.at(amount_index + 1_usize);
+
+        let amount_low: u128 = match amount_low_felt.try_into() {
+            Option::Some(value) => value,
+            Option::None(_) => {
+                assert(false, ERR_VALUE_LIMIT_EXCEEDED);
+                0_u128
+            },
+        };
+
+        let amount_high: u128 = match amount_high_felt.try_into() {
+            Option::Some(value) => value,
+            Option::None(_) => {
+                assert(false, ERR_VALUE_LIMIT_EXCEEDED);
+                0_u128
+            },
+        };
+
+        let amount = u256 { low: amount_low, high: amount_high };
+
+        if amount.high > limit.high {
+            assert(false, ERR_VALUE_LIMIT_EXCEEDED);
+        } else if amount.high == limit.high {
+            assert(amount.low <= limit.low, ERR_VALUE_LIMIT_EXCEEDED);
+        }
     }
 
     fn poseidon_chain(acc: felt252, value: felt252) -> felt252 {
@@ -792,36 +826,9 @@ pub mod UA2Account {
             assert(selector_allowed == true, ERR_POLICY_SELECTOR_DENIED);
 
             if selector == ERC20_TRANSFER_SEL {
-                let calldata_len = calldata.len();
-                require(calldata_len >= 3_usize, ERR_VALUE_LIMIT_EXCEEDED);
-
-                let amount_low_felt = *calldata.at(1_usize);
-                let amount_high_felt = *calldata.at(2_usize);
-
-                let amount_low: u128 = match amount_low_felt.try_into() {
-                    Option::Some(value) => value,
-                    Option::None(_) => {
-                        assert(false, ERR_VALUE_LIMIT_EXCEEDED);
-                        0_u128
-                    },
-                };
-
-                let amount_high: u128 = match amount_high_felt.try_into() {
-                    Option::Some(value) => value,
-                    Option::None(_) => {
-                        assert(false, ERR_VALUE_LIMIT_EXCEEDED);
-                        0_u128
-                    },
-                };
-
-                let amount = u256 { low: amount_low, high: amount_high };
-                let limit = policy.max_value_per_call;
-
-                if amount.high > limit.high {
-                    assert(false, ERR_VALUE_LIMIT_EXCEEDED);
-                } else if amount.high == limit.high {
-                    assert(amount.low <= limit.low, ERR_VALUE_LIMIT_EXCEEDED);
-                }
+                enforce_value_limit(calldata, 1_usize, policy.max_value_per_call);
+            } else if selector == ERC20_TRANSFER_FROM_SEL {
+                enforce_value_limit(calldata, 2_usize, policy.max_value_per_call);
             }
         }
 

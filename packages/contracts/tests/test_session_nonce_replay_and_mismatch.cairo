@@ -18,6 +18,7 @@ use crate::session_test_utils::{build_session_signature, session_key};
 
 const OWNER_PUBKEY: felt252 = 0x12345;
 const TRANSFER_SELECTOR: felt252 = starknet::selector!("transfer");
+const ALT_SESSION_PUBKEY: felt252 = 0xABCDEF12345;
 
 fn deploy_account_and_mock() -> (ContractAddress, ContractAddress) {
     let account_declare = declare("UA2Account").unwrap();
@@ -162,6 +163,56 @@ fn test_session_nonce_replay_and_mismatch() {
 
     let invalid_result = execute_with_signature(account_address, @tampered_calls, @signature2);
     assert_reverted_with(invalid_result, ERR_SESSION_SIG_INVALID);
+
+    stop_cheat_block_timestamp(account_address);
+}
+
+#[test]
+fn cross_session_signature_reuse_fails() {
+    let (account_address, mock_address) = deploy_account_and_mock();
+
+    let policy = SessionPolicy {
+        is_active: true,
+        valid_after: 0_u64,
+        valid_until: 10_000_u64,
+        max_calls: 5_u32,
+        calls_used: 0_u32,
+        max_value_per_call: u256 { low: 10_000_u128, high: 0_u128 },
+        owner_epoch: 0_u64,
+    };
+
+    let session_pubkey_a = session_key();
+    add_session(account_address, session_pubkey_a, mock_address, policy);
+    add_session(account_address, ALT_SESSION_PUBKEY, mock_address, policy);
+
+    start_cheat_block_timestamp(account_address, 5_000_u64);
+
+    let to: ContractAddress = account_address;
+    let amount = u256 { low: 1_000_u128, high: 0_u128 };
+    let call = build_transfer_call(mock_address, to, amount);
+    let calls = array![call];
+
+    let signature_a: Array<felt252> = build_session_signature(
+        account_address,
+        session_pubkey_a,
+        0_u128,
+        policy.valid_until,
+        @calls,
+    );
+
+    let mut swapped_signature = ArrayTrait::<felt252>::new();
+    let mut index = 0_usize;
+    for felt_ref in signature_a.span() {
+        if index == 1_usize {
+            swapped_signature.append(ALT_SESSION_PUBKEY);
+        } else {
+            swapped_signature.append(*felt_ref);
+        }
+        index += 1_usize;
+    }
+
+    let result = execute_with_signature(account_address, @calls, @swapped_signature);
+    assert_reverted_with(result, ERR_SESSION_SIG_INVALID);
 
     stop_cheat_block_timestamp(account_address);
 }

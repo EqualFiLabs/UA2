@@ -149,11 +149,11 @@ struct SessionPolicy {
     valid_until: u64,                // block timestamp
     max_calls: u32,
     calls_used: u32,
-    max_value_per_call: Uint256,     // wei-like units for token/native
+    max_value_per_call: Uint256,     // wei-like units for ERC-20 transfers (native send unsupported in v0)
 }
 ```
 
-Selector and target allowlists are stored separately under `sessionTargetAllow(session_key_hash, ContractAddress)` and `sessionSelectorAllow(session_key_hash, felt252)` legacy maps. The owner typically calls `add_session_with_allowlists` to write the base policy and seed those maps in a single transaction.
+Selector and target allowlists are stored separately under `sessionTargetAllow(session_key_hash, ContractAddress)` and `sessionSelectorAllow(session_key_hash, felt252)` legacy maps. The owner typically calls `add_session_with_allowlists` to write the base policy and seed those maps in a single transaction. Empty allowlists are technically valid but render the session unusable, and we recommend keeping each list ≤32 entries in v0 to avoid excessive storage writes.
 
 **Validation path:**
 
@@ -162,7 +162,7 @@ Selector and target allowlists are stored separately under `sessionTargetAllow(s
 
   * Check `is_active`, `now >= valid_after`, `now <= valid_until`, and `calls_used + tx_call_count <= max_calls`.
   * Require allowlist booleans for `(key_hash, target)` and `(key_hash, selector)` to be `true`.
-  * Enforce ERC-20 transfer amounts ≤ `max_value_per_call`.
+  * Enforce ERC-20 `transfer` / `transferFrom` amounts ≤ `max_value_per_call` (native `call.value` transfers are out-of-scope for v0).
   * Require session nonce match, then verify the ECDSA signature over the poseidon-hashed call set.
   * Call `apply_session_usage` to bump counters/nonce and emit `SessionUsed` + `SessionNonceAdvanced`.
 

@@ -14,7 +14,7 @@ use starknet::syscalls::call_contract_syscall;
 use starknet::{ContractAddress, SyscallResult, SyscallResultTrait};
 use ua2_contracts::errors::{
     ERR_POLICY_CALLCAP, ERR_POLICY_SELECTOR_DENIED, ERR_POLICY_TARGET_DENIED, ERR_SESSION_EXPIRED,
-    ERR_SESSION_SELECTORS_LEN, ERR_SESSION_TARGETS_LEN, ERR_VALUE_LIMIT_EXCEEDED,
+    ERR_SESSION_NOT_READY, ERR_SESSION_SELECTORS_LEN, ERR_SESSION_TARGETS_LEN, ERR_VALUE_LIMIT_EXCEEDED,
 };
 use ua2_contracts::session::Session;
 use ua2_contracts::ua2_account::UA2Account::SessionPolicy;
@@ -22,6 +22,7 @@ use crate::session_test_utils::{build_session_signature, session_key};
 
 const OWNER_PUBKEY: felt252 = 0x12345;
 const TRANSFER_SELECTOR: felt252 = starknet::selector!("transfer");
+const TRANSFER_FROM_SELECTOR: felt252 = starknet::selector!("transferFrom");
 
 fn deploy_account_and_mock() -> (ContractAddress, ContractAddress) {
     let account_declare = declare("UA2Account").unwrap();
@@ -101,6 +102,21 @@ fn build_transfer_call(mock_address: ContractAddress, to: ContractAddress, amoun
     calldata.append(amount.high.into());
 
     Call { to: mock_address, selector: TRANSFER_SELECTOR, calldata: calldata.span() }
+}
+
+fn build_transfer_from_call(
+    mock_address: ContractAddress,
+    from: ContractAddress,
+    to: ContractAddress,
+    amount: u256,
+) -> Call {
+    let mut calldata = array![];
+    calldata.append(from.into());
+    calldata.append(to.into());
+    calldata.append(amount.low.into());
+    calldata.append(amount.high.into());
+
+    Call { to: mock_address, selector: TRANSFER_FROM_SELECTOR, calldata: calldata.span() }
 }
 
 fn execute_session_calls(
@@ -295,6 +311,46 @@ fn denies_target_not_allowed() {
 }
 
 #[test]
+fn empty_allowlists_reject_calls() {
+    let (account_address, mock_address) = deploy_account_and_mock();
+
+    let policy = SessionPolicy {
+        is_active: true,
+        valid_after: 0_u64,
+        valid_until: 10_000_u64,
+        max_calls: 5_u32,
+        calls_used: 0_u32,
+        max_value_per_call: u256 { low: 10_000_u128, high: 0_u128 },
+        owner_epoch: 0_u64,
+    };
+
+    let targets = array![];
+    let selectors = array![];
+
+    let session_pubkey = session_key();
+    add_session_with_lists(account_address, session_pubkey, policy, @targets, @selectors);
+
+    start_cheat_block_timestamp(account_address, 5_000_u64);
+
+    let to: ContractAddress = account_address;
+    let amount = u256 { low: 1_000_u128, high: 0_u128 };
+    let call = build_transfer_call(mock_address, to, amount);
+    let calls = array![call];
+
+    let result = execute_session_calls(
+        account_address,
+        @calls,
+        0_u128,
+        session_pubkey,
+        policy.valid_until,
+    );
+
+    assert_reverted_with(result, ERR_POLICY_TARGET_DENIED);
+
+    stop_cheat_block_timestamp(account_address);
+}
+
+#[test]
 fn denies_expired_session() {
     let (account_address, mock_address) = deploy_account_and_mock();
 
@@ -326,6 +382,46 @@ fn denies_expired_session() {
     );
 
     assert_reverted_with(result, ERR_SESSION_EXPIRED);
+
+    stop_cheat_block_timestamp(account_address);
+}
+
+#[test]
+fn denies_session_not_ready() {
+    let (account_address, mock_address) = deploy_account_and_mock();
+
+    let policy = SessionPolicy {
+        is_active: true,
+        valid_after: 6_000_u64,
+        valid_until: 12_000_u64,
+        max_calls: 5_u32,
+        calls_used: 0_u32,
+        max_value_per_call: u256 { low: 10_000_u128, high: 0_u128 },
+        owner_epoch: 0_u64,
+    };
+
+    let mut targets = array![mock_address];
+    let mut selectors = array![TRANSFER_SELECTOR];
+
+    let session_pubkey = session_key();
+    add_session_with_lists(account_address, session_pubkey, policy, @targets, @selectors);
+
+    start_cheat_block_timestamp(account_address, 5_000_u64);
+
+    let to: ContractAddress = account_address;
+    let amount = u256 { low: 1_000_u128, high: 0_u128 };
+    let call = build_transfer_call(mock_address, to, amount);
+    let calls = array![call];
+
+    let result = execute_session_calls(
+        account_address,
+        @calls,
+        0_u128,
+        session_pubkey,
+        policy.valid_until,
+    );
+
+    assert_reverted_with(result, ERR_SESSION_NOT_READY);
 
     stop_cheat_block_timestamp(account_address);
 }
@@ -396,6 +492,47 @@ fn denies_over_value_cap() {
 
     let result = execute_session_calls(
         account_address, @calls, 0_u128, session_pubkey, policy.valid_until,
+    );
+
+    assert_reverted_with(result, ERR_VALUE_LIMIT_EXCEEDED);
+
+    stop_cheat_block_timestamp(account_address);
+}
+
+#[test]
+fn denies_transfer_from_over_value_cap() {
+    let (account_address, mock_address) = deploy_account_and_mock();
+
+    let policy = SessionPolicy {
+        is_active: true,
+        valid_after: 0_u64,
+        valid_until: 10_000_u64,
+        max_calls: 5_u32,
+        calls_used: 0_u32,
+        max_value_per_call: u256 { low: 1_000_u128, high: 0_u128 },
+        owner_epoch: 0_u64,
+    };
+
+    let mut targets = array![mock_address];
+    let mut selectors = array![TRANSFER_FROM_SELECTOR];
+
+    let session_pubkey = session_key();
+    add_session_with_lists(account_address, session_pubkey, policy, @targets, @selectors);
+
+    start_cheat_block_timestamp(account_address, 5_000_u64);
+
+    let from: ContractAddress = account_address;
+    let to: ContractAddress = account_address;
+    let amount = u256 { low: 5_000_u128, high: 0_u128 };
+    let call = build_transfer_from_call(mock_address, from, to, amount);
+    let calls = array![call];
+
+    let result = execute_session_calls(
+        account_address,
+        @calls,
+        0_u128,
+        session_pubkey,
+        policy.valid_until,
     );
 
     assert_reverted_with(result, ERR_VALUE_LIMIT_EXCEEDED);

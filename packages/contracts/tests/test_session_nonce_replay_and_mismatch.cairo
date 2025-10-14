@@ -19,6 +19,7 @@ use starknet::account::Call;
 use starknet::syscalls::call_contract_syscall;
 use starknet::{ContractAddress, SyscallResult, SyscallResultTrait};
 use ua2_contracts::ua2_account::UA2Account::SessionPolicy;
+use ua2_contracts::session::Session;
 
 use crate::session_test_utils::{build_session_signature, session_key};
 
@@ -47,20 +48,26 @@ fn add_session(
 ) {
     start_cheat_caller_address(account_address, account_address);
 
-    let mut calldata = array![];
-    calldata.append(session_pubkey);
-    let active_flag: felt252 = if policy.is_active { 1 } else { 0 };
-    calldata.append(active_flag);
-    calldata.append(policy.expires_at.into());
-    calldata.append(policy.max_calls.into());
-    calldata.append(policy.calls_used.into());
-    calldata.append(policy.max_value_per_call.low.into());
-    calldata.append(policy.max_value_per_call.high.into());
+    let mut targets: Array<ContractAddress> = array![];
+    targets.append(mock_address);
 
-    calldata.append(1.into());
-    calldata.append(mock_address.into());
-    calldata.append(1.into());
-    calldata.append(TRANSFER_SELECTOR);
+    let mut selectors: Array<felt252> = array![];
+    selectors.append(TRANSFER_SELECTOR);
+
+    let session = Session {
+        pubkey: session_pubkey,
+        valid_after: policy.valid_after,
+        valid_until: policy.valid_until,
+        max_calls: policy.max_calls,
+        value_cap: policy.max_value_per_call,
+        targets_len: 1_u32,
+        targets,
+        selectors_len: 1_u32,
+        selectors,
+    };
+
+    let mut calldata = array![];
+    Serde::<Session>::serialize(@session, ref calldata);
 
     call_contract_syscall(
         account_address,
@@ -126,7 +133,8 @@ fn test_session_nonce_replay_and_mismatch() {
     let session_pubkey = session_key();
     let policy = SessionPolicy {
         is_active: true,
-        expires_at: 10_000_u64,
+        valid_after: 0_u64,
+        valid_until: 10_000_u64,
         max_calls: 5_u32,
         calls_used: 0_u32,
         max_value_per_call: u256 { low: 10_000_u128, high: 0_u128 },

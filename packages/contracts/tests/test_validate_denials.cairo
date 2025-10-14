@@ -1,5 +1,6 @@
 use core::array::{Array, ArrayTrait, SpanTrait};
 use core::integer::u256;
+use core::option::Option;
 use core::result::Result;
 use core::serde::Serde;
 use core::traits::{Into, TryInto};
@@ -19,6 +20,7 @@ use starknet::account::Call;
 use starknet::syscalls::call_contract_syscall;
 use starknet::{ContractAddress, SyscallResult, SyscallResultTrait};
 use ua2_contracts::ua2_account::UA2Account::SessionPolicy;
+use ua2_contracts::session::Session;
 
 use crate::session_test_utils::{build_session_signature, session_key};
 
@@ -27,6 +29,8 @@ const TRANSFER_SELECTOR: felt252 = starknet::selector!("transfer");
 const ERR_POLICY_SELECTOR_DENIED: felt252 = 'ERR_POLICY_SELECTOR_DENIED';
 const ERR_POLICY_TARGET_DENIED: felt252 = 'ERR_POLICY_TARGET_DENIED';
 const ERR_SESSION_EXPIRED: felt252 = 'ERR_SESSION_EXPIRED';
+const ERR_SESSION_TARGETS_LEN: felt252 = 'ERR_SESSION_TARGETS_LEN';
+const ERR_SESSION_SELECTORS_LEN: felt252 = 'ERR_SESSION_SELECTORS_LEN';
 const ERR_POLICY_CALLCAP: felt252 = 'ERR_POLICY_CALLCAP';
 const ERR_VALUE_LIMIT_EXCEEDED: felt252 = 'ERR_VALUE_LIMIT_EXCEEDED';
 
@@ -51,33 +55,47 @@ fn add_session_with_lists(
 ) {
     start_cheat_caller_address(account_address, account_address);
 
+    let mut owned_targets: Array<ContractAddress> = array![];
+    for target_ref in targets.span() {
+        owned_targets.append(*target_ref);
+    }
+    let mut owned_selectors: Array<felt252> = array![];
+    for selector_ref in selectors.span() {
+        owned_selectors.append(*selector_ref);
+    }
+
+    let targets_len_usize = ArrayTrait::<ContractAddress>::len(@owned_targets);
+    let selectors_len_usize = ArrayTrait::<felt252>::len(@owned_selectors);
+
+    let targets_len: u32 = match targets_len_usize.try_into() {
+        Option::Some(value) => value,
+        Option::None(_) => {
+            assert(false, 'targets too long');
+            0_u32
+        },
+    };
+    let selectors_len: u32 = match selectors_len_usize.try_into() {
+        Option::Some(value) => value,
+        Option::None(_) => {
+            assert(false, 'selectors too long');
+            0_u32
+        },
+    };
+
+    let session = Session {
+        pubkey: key,
+        valid_after: policy.valid_after,
+        valid_until: policy.valid_until,
+        max_calls: policy.max_calls,
+        value_cap: policy.max_value_per_call,
+        targets_len,
+        targets: owned_targets,
+        selectors_len,
+        selectors: owned_selectors,
+    };
+
     let mut calldata = array![];
-    calldata.append(key);
-    let active_flag: felt252 = if policy.is_active { 1 } else { 0 };
-    calldata.append(active_flag);
-    calldata.append(policy.expires_at.into());
-    calldata.append(policy.max_calls.into());
-    calldata.append(policy.calls_used.into());
-    calldata.append(policy.max_value_per_call.low.into());
-    calldata.append(policy.max_value_per_call.high.into());
-
-    let targets_len = ArrayTrait::<ContractAddress>::len(targets);
-    calldata.append(targets_len.into());
-    let mut i = 0_usize;
-    while i < targets_len {
-        let target = *ArrayTrait::<ContractAddress>::at(targets, i);
-        calldata.append(target.into());
-        i += 1_usize;
-    }
-
-    let selectors_len = ArrayTrait::<felt252>::len(selectors);
-    calldata.append(selectors_len.into());
-    i = 0_usize;
-    while i < selectors_len {
-        let selector = *ArrayTrait::<felt252>::at(selectors, i);
-        calldata.append(selector);
-        i += 1_usize;
-    }
+    Serde::<Session>::serialize(@session, ref calldata);
 
     call_contract_syscall(
         account_address,
@@ -144,12 +162,99 @@ fn assert_reverted_with(result: SyscallResult<Span<felt252>>, expected: felt252)
 }
 
 #[test]
+fn rejects_length_mismatch() {
+    let (account_address, _) = deploy_account_and_mock();
+
+    let session_pubkey = session_key();
+
+    start_cheat_caller_address(account_address, account_address);
+
+    let mut empty_targets = ArrayTrait::<ContractAddress>::new();
+    let mut selectors_one = ArrayTrait::<felt252>::new();
+    selectors_one.append(TRANSFER_SELECTOR);
+
+    let session_targets_mismatch = Session {
+        pubkey: session_pubkey,
+        valid_after: 0_u64,
+        valid_until: 10_000_u64,
+        max_calls: 1_u32,
+        value_cap: u256 { low: 1_000_u128, high: 0_u128 },
+        targets_len: 1_u32,
+        targets: empty_targets,
+        selectors_len: 1_u32,
+        selectors: selectors_one,
+    };
+
+    let mut calldata = array![];
+    Serde::<Session>::serialize(@session_targets_mismatch, ref calldata);
+
+    let result = call_contract_syscall(
+        account_address,
+        starknet::selector!("add_session_with_allowlists"),
+        calldata.span(),
+    );
+
+    match result {
+        Result::Ok(_) => {
+            assert(false, 'expected targets len mismatch');
+        },
+        Result::Err(panic_data) => {
+            let data = panic_data.span();
+            assert(data.len() > 0_usize, 'missing panic data');
+            let reason = *data.at(0_usize);
+            assert(reason == ERR_SESSION_TARGETS_LEN, 'unexpected targets len error');
+        },
+    }
+
+    let mut targets_one = ArrayTrait::<ContractAddress>::new();
+    targets_one.append(account_address);
+    let mut selectors_mismatch = ArrayTrait::<felt252>::new();
+    selectors_mismatch.append(TRANSFER_SELECTOR);
+
+    let session_selectors_mismatch = Session {
+        pubkey: session_pubkey,
+        valid_after: 0_u64,
+        valid_until: 10_000_u64,
+        max_calls: 1_u32,
+        value_cap: u256 { low: 1_000_u128, high: 0_u128 },
+        targets_len: 1_u32,
+        targets: targets_one,
+        selectors_len: 2_u32,
+        selectors: selectors_mismatch,
+    };
+
+    let mut calldata_selectors = array![];
+    Serde::<Session>::serialize(@session_selectors_mismatch, ref calldata_selectors);
+
+    let selectors_result = call_contract_syscall(
+        account_address,
+        starknet::selector!("add_session_with_allowlists"),
+        calldata_selectors.span(),
+    );
+
+    match selectors_result {
+        Result::Ok(_) => {
+            assert(false, 'expected selectors len mismatch');
+        },
+        Result::Err(panic_data) => {
+            let data = panic_data.span();
+            assert(data.len() > 0_usize, 'missing panic data');
+            let reason = *data.at(0_usize);
+            assert(reason == ERR_SESSION_SELECTORS_LEN, 'unexpected selectors len error');
+        },
+    }
+
+    stop_cheat_caller_address(account_address);
+}
+
+#[test]
 fn denies_selector_not_allowed() {
     let (account_address, mock_address) = deploy_account_and_mock();
 
     let policy = SessionPolicy {
         is_active: true,
-        expires_at: 10_000_u64,
+        valid_after: 0_u64,
+        valid_until: 10_000_u64,
         max_calls: 5_u32,
         calls_used: 0_u32,
         max_value_per_call: u256 { low: 10_000_u128, high: 0_u128 },
@@ -181,7 +286,8 @@ fn denies_target_not_allowed() {
 
     let policy = SessionPolicy {
         is_active: true,
-        expires_at: 10_000_u64,
+        valid_after: 0_u64,
+        valid_until: 10_000_u64,
         max_calls: 5_u32,
         calls_used: 0_u32,
         max_value_per_call: u256 { low: 10_000_u128, high: 0_u128 },
@@ -213,7 +319,8 @@ fn denies_expired_session() {
 
     let policy = SessionPolicy {
         is_active: true,
-        expires_at: 6_000_u64,
+        valid_after: 0_u64,
+        valid_until: 6_000_u64,
         max_calls: 5_u32,
         calls_used: 0_u32,
         max_value_per_call: u256 { low: 10_000_u128, high: 0_u128 },
@@ -245,7 +352,8 @@ fn denies_over_call_cap() {
 
     let policy = SessionPolicy {
         is_active: true,
-        expires_at: 10_000_u64,
+        valid_after: 0_u64,
+        valid_until: 10_000_u64,
         max_calls: 1_u32,
         calls_used: 0_u32,
         max_value_per_call: u256 { low: 10_000_u128, high: 0_u128 },
@@ -278,7 +386,8 @@ fn denies_over_value_cap() {
 
     let policy = SessionPolicy {
         is_active: true,
-        expires_at: 10_000_u64,
+        valid_after: 0_u64,
+        valid_until: 10_000_u64,
         max_calls: 5_u32,
         calls_used: 0_u32,
         max_value_per_call: u256 { low: 1_000_u128, high: 0_u128 },

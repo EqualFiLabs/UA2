@@ -237,7 +237,7 @@ sncast --profile sepolia invoke \
     <ALLOWED_SELECTOR_2>
 ```
 
-The calldata order is: session key, `is_active`, `expires_at`, `max_calls`, `calls_used`, `max_value_per_call.low`,
+The calldata order is: session key, `valid_after`, `valid_until`, `max_calls`, `max_value_per_call.low`,
 `max_value_per_call.high`, number of allowed targets, each target address, number of allowed selectors, each selector felt.
 If the contract checks revert, verify you supplied proper calldata as per `docs/interfaces.md`.
 

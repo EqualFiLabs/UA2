@@ -5,6 +5,7 @@ use openzeppelin::introspection::src5::SRC5Component;
 #[feature("deprecated_legacy_map")]
 pub mod UA2Account {
     use super::{AccountComponent, SRC5Component};
+    use crate::session::Session;
     use core::array::{Array, ArrayTrait, SpanTrait};
     use core::option::Option;
     use core::traits::{Into, TryInto};
@@ -34,6 +35,9 @@ pub mod UA2Account {
     const ERR_POLICY_SELECTOR_DENIED: felt252 = 'ERR_POLICY_SELECTOR_DENIED';
     const ERR_POLICY_TARGET_DENIED: felt252 = 'ERR_POLICY_TARGET_DENIED';
     const ERR_VALUE_LIMIT_EXCEEDED: felt252 = 'ERR_VALUE_LIMIT_EXCEEDED';
+    const ERR_SESSION_NOT_READY: felt252 = 'ERR_SESSION_NOT_READY';
+    const ERR_SESSION_TARGETS_LEN: felt252 = 'ERR_SESSION_TARGETS_LEN';
+    const ERR_SESSION_SELECTORS_LEN: felt252 = 'ERR_SESSION_SELECTORS_LEN';
     const ERR_POLICY_CALLCOUNT_MISMATCH: felt252 = 'ERR_POLICY_CALLCOUNT_MISMATCH';
     const ERR_BAD_SESSION_NONCE: felt252 = 'ERR_BAD_SESSION_NONCE';
     const ERR_SESSION_SIG_INVALID: felt252 = 'ERR_SESSION_SIG_INVALID';
@@ -85,7 +89,8 @@ pub mod UA2Account {
     #[derive(Copy, Drop, Serde, starknet::Store)]
     pub struct SessionPolicy {
         pub is_active: bool,
-        pub expires_at: u64,
+        pub valid_after: u64,
+        pub valid_until: u64,
         pub max_calls: u32,
         pub calls_used: u32,
         pub max_value_per_call: u256,
@@ -94,7 +99,8 @@ pub mod UA2Account {
     #[derive(Drop, starknet::Event)]
     pub struct SessionAdded {
         pub key_hash: felt252,
-        pub expires_at: u64,
+        pub valid_after: u64,
+        pub valid_until: u64,
         pub max_calls: u32,
     }
 
@@ -420,32 +426,60 @@ pub mod UA2Account {
     }
 
     #[external(v0)]
-    fn add_session_with_allowlists(
-        ref self: ContractState,
-        key: felt252,
-        mut policy: SessionPolicy,
-        targets: Array<ContractAddress>,
-        selectors: Array<felt252>,
-    ) {
+    fn add_session_with_allowlists(ref self: ContractState, session: Session) {
         assert_owner();
-        self.add_session(key, policy);
 
-        let key_hash = derive_key_hash(key);
+        let Session {
+            pubkey,
+            valid_after,
+            valid_until,
+            max_calls,
+            value_cap,
+            targets_len,
+            targets,
+            selectors_len,
+            selectors,
+        } = session;
 
-        let mut i = 0_usize;
-        let targets_len = ArrayTrait::<ContractAddress>::len(@targets);
-        while i < targets_len {
-            let target = *ArrayTrait::<ContractAddress>::at(@targets, i);
-            self.session_target_allow.write((key_hash, target), true);
-            i += 1_usize;
+        let declared_targets_len: usize = match targets_len.try_into() {
+            Option::Some(value) => value,
+            Option::None(_) => {
+                assert(false, ERR_SESSION_TARGETS_LEN);
+                0_usize
+            },
+        };
+        let actual_targets_len = ArrayTrait::<ContractAddress>::len(@targets);
+        require(actual_targets_len == declared_targets_len, ERR_SESSION_TARGETS_LEN);
+
+        let declared_selectors_len: usize = match selectors_len.try_into() {
+            Option::Some(value) => value,
+            Option::None(_) => {
+                assert(false, ERR_SESSION_SELECTORS_LEN);
+                0_usize
+            },
+        };
+        let actual_selectors_len = ArrayTrait::<felt252>::len(@selectors);
+        require(actual_selectors_len == declared_selectors_len, ERR_SESSION_SELECTORS_LEN);
+
+        let mut policy = SessionPolicy {
+            is_active: false,
+            valid_after,
+            valid_until,
+            max_calls,
+            calls_used: 0_u32,
+            max_value_per_call: value_cap,
+        };
+
+        self.add_session(pubkey, policy);
+
+        let key_hash = derive_key_hash(pubkey);
+
+        for target_ref in targets.span() {
+            self.session_target_allow.write((key_hash, *target_ref), true);
         }
 
-        i = 0_usize;
-        let selectors_len = ArrayTrait::<felt252>::len(@selectors);
-        while i < selectors_len {
-            let selector = *ArrayTrait::<felt252>::at(@selectors, i);
-            self.session_selector_allow.write((key_hash, selector), true);
-            i += 1_usize;
+        for selector_ref in selectors.span() {
+            self.session_selector_allow.write((key_hash, *selector_ref), true);
         }
     }
 
@@ -462,7 +496,8 @@ pub mod UA2Account {
         require(policy.is_active, ERR_SESSION_INACTIVE);
 
         let now = get_block_timestamp();
-        require(now <= policy.expires_at, ERR_SESSION_EXPIRED);
+        require(now >= policy.valid_after, ERR_SESSION_NOT_READY);
+        require(now <= policy.valid_until, ERR_SESSION_EXPIRED);
 
         require(policy.calls_used == prior_calls_used, ERR_POLICY_CALLCOUNT_MISMATCH);
 
@@ -487,7 +522,7 @@ pub mod UA2Account {
         fn add_session(ref self: ContractState, key: felt252, mut policy: SessionPolicy) {
             assert_owner();
 
-            assert(policy.expires_at > 0_u64, 'BAD_EXPIRY');
+            assert(policy.valid_until > policy.valid_after, 'BAD_VALID_WINDOW');
             assert(policy.max_calls > 0_u32, 'BAD_MAX_CALLS');
 
             let key_hash = derive_key_hash(key);
@@ -498,7 +533,12 @@ pub mod UA2Account {
             self.session.write(key_hash, policy);
             self.session_nonce.write(key_hash, 0_u128);
 
-            self.emit(Event::SessionAdded(SessionAdded { key_hash, expires_at: policy.expires_at, max_calls: policy.max_calls }));
+            self.emit(Event::SessionAdded(SessionAdded {
+                key_hash,
+                valid_after: policy.valid_after,
+                valid_until: policy.valid_until,
+                max_calls: policy.max_calls,
+            }));
         }
 
         fn get_session(self: @ContractState, key_hash: felt252) -> SessionPolicy {
@@ -701,7 +741,8 @@ pub mod UA2Account {
         require(policy.is_active, ERR_SESSION_INACTIVE);
 
         let now = get_block_timestamp();
-        require(now <= policy.expires_at, ERR_SESSION_EXPIRED);
+        require(now >= policy.valid_after, ERR_SESSION_NOT_READY);
+        require(now <= policy.valid_until, ERR_SESSION_EXPIRED);
 
         let calls_len = ArrayTrait::<Call>::len(calls);
         let tx_call_count: u32 = match calls_len.try_into() {

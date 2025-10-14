@@ -103,8 +103,10 @@ export interface SessionAllow {
 }
 
 export interface SessionPolicyInput {
+  /** Earliest timestamp the session can be used (seconds since epoch). */
+  validAfter: number;
   /** Expiration timestamp (seconds since epoch). */
-  expiresAt: number;
+  validUntil: number;
   /** Limits per session. */
   limits: SessionLimits;
   /** Allowlist constraints. */
@@ -116,7 +118,8 @@ export interface SessionPolicyInput {
 /** The on-chain policy struct shape (Cairo ordering). */
 export interface SessionPolicyCalldata {
   is_active: Felt;            // 0x0 or 0x1
-  expires_at: Felt;           // u64 -> felt
+  valid_after: Felt;          // u64 -> felt
+  valid_until: Felt;          // u64 -> felt
   max_calls: Felt;            // u32 -> felt
   calls_used: Felt;           // u32 -> felt (init 0)
   max_value_per_call_low: Felt;

@@ -27,6 +27,7 @@ use ua2_contracts::ua2_account::UA2Account::{
     SessionPolicy,
     SessionUsed,
 };
+use ua2_contracts::session::Session;
 
 use crate::session_test_utils::{
     build_session_signature,
@@ -48,11 +49,13 @@ fn session_allows_whitelisted_calls() {
     let mock_class = mock_declare.contract_class();
     let (mock_address, _) = mock_class.deploy(@array![]).unwrap_syscall();
 
-    let expires_at = 10_000_u64;
+    let valid_after = 0_u64;
+    let valid_until = 10_000_u64;
 
     let policy = SessionPolicy {
         is_active: true,
-        expires_at,
+        valid_after,
+        valid_until,
         max_calls: 1_u32,
         calls_used: 0_u32,
         max_value_per_call: u256 { low: 1_000_u128, high: 0_u128 },
@@ -61,20 +64,27 @@ fn session_allows_whitelisted_calls() {
     start_cheat_block_timestamp(account_address, 5_000_u64);
 
     start_cheat_caller_address(account_address, account_address);
-    let mut allowlist_calldata = array![];
     let session_pubkey = session_key();
     let key_hash = session_key_hash();
-    allowlist_calldata.append(session_pubkey);
-    allowlist_calldata.append(1.into());
-    allowlist_calldata.append(expires_at.into());
-    allowlist_calldata.append(policy.max_calls.into());
-    allowlist_calldata.append(policy.calls_used.into());
-    allowlist_calldata.append(policy.max_value_per_call.low.into());
-    allowlist_calldata.append(policy.max_value_per_call.high.into());
-    allowlist_calldata.append(1.into());
-    allowlist_calldata.append(mock_address.into());
-    allowlist_calldata.append(1.into());
-    allowlist_calldata.append(TRANSFER_SELECTOR);
+    let mut targets: Array<ContractAddress> = array![];
+    targets.append(mock_address);
+    let mut selectors: Array<felt252> = array![];
+    selectors.append(TRANSFER_SELECTOR);
+
+    let session = Session {
+        pubkey: session_pubkey,
+        valid_after,
+        valid_until,
+        max_calls: policy.max_calls,
+        value_cap: policy.max_value_per_call,
+        targets_len: 1_u32,
+        targets,
+        selectors_len: 1_u32,
+        selectors,
+    };
+
+    let mut allowlist_calldata = array![];
+    Serde::<Session>::serialize(@session, ref allowlist_calldata);
 
     call_contract_syscall(
         account_address,

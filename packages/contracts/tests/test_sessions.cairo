@@ -42,7 +42,8 @@ fn add_get_revoke_session_works() {
     let key_hash = pedersen(key, 0);
     let policy = SessionPolicy {
         is_active: false,
-        expires_at: 3_600_u64,
+        valid_after: 0_u64,
+        valid_until: 3_600_u64,
         max_calls: 5_u32,
         calls_used: 2_u32,
         max_value_per_call: u256 { low: 0, high: 0 },
@@ -52,7 +53,7 @@ fn add_get_revoke_session_works() {
 
     let stored_policy = dispatcher.get_session(key_hash);
     assert(stored_policy.is_active == true, 'session inactive');
-    assert(stored_policy.expires_at == 3_600_u64, 'expiry mismatch');
+    assert(stored_policy.valid_until == 3_600_u64, 'expiry mismatch');
     assert(stored_policy.max_calls == 5_u32, 'max calls mismatch');
     assert(stored_policy.calls_used == 0_u32, 'calls used not reset');
 
@@ -75,7 +76,8 @@ fn events_emitted() {
     let key_hash = pedersen(key, 0);
     let policy = SessionPolicy {
         is_active: true,
-        expires_at: 7_200_u64,
+        valid_after: 0_u64,
+        valid_until: 7_200_u64,
         max_calls: 10_u32,
         calls_used: 0_u32,
         max_value_per_call: u256 { low: 0, high: 0 },
@@ -91,7 +93,8 @@ fn events_emitted() {
             contract_address,
             UA2Account::Event::SessionAdded(SessionAdded {
                 key_hash,
-                expires_at: 7_200_u64,
+                valid_after: 0_u64,
+                valid_until: 7_200_u64,
                 max_calls: 10_u32,
             }),
         ),

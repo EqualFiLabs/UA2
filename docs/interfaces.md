@@ -26,7 +26,8 @@
 ```rust
 struct SessionPolicy {
     is_active: bool,
-    expires_at: u64,
+    valid_after: u64,
+    valid_until: u64,
     max_calls: u32,
     calls_used: u32,
     max_value_per_call: Uint256,
@@ -39,7 +40,7 @@ The selector and target allowlists are not embedded in the struct. They are stor
 
 ## Events
 
-* `SessionAdded(key_hash: felt252, expires_at: u64, max_calls: u32)`
+* `SessionAdded(key_hash: felt252, valid_after: u64, valid_until: u64, max_calls: u32)`
 * `SessionRevoked(key_hash: felt252)`
 * `SessionUsed(key_hash: felt252, used: u32)`
 * `SessionNonceAdvanced(key_hash: felt252, new_nonce: u128)`

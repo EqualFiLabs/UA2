@@ -145,7 +145,8 @@ OZ Account is the canonical base for `__validate__`/`__execute__` pattern and mu
 ```
 struct SessionPolicy {
     is_active: bool,
-    expires_at: u64,                 // block timestamp
+    valid_after: u64,                // block timestamp
+    valid_until: u64,                // block timestamp
     max_calls: u32,
     calls_used: u32,
     max_value_per_call: Uint256,     // wei-like units for token/native
@@ -159,7 +160,7 @@ Selector and target allowlists are stored separately under `sessionTargetAllow(s
 * If signature is by `owner_pubkey`: standard path.
 * Else if signature verifies to a registered **session key**:
 
-  * Check `is_active`, `now <= expires_at`, and `calls_used + tx_call_count <= max_calls`.
+  * Check `is_active`, `now >= valid_after`, `now <= valid_until`, and `calls_used + tx_call_count <= max_calls`.
   * Require allowlist booleans for `(key_hash, target)` and `(key_hash, selector)` to be `true`.
   * Enforce ERC-20 transfer amounts ≤ `max_value_per_call`.
   * Require session nonce match, then verify the ECDSA signature over the poseidon-hashed call set.
@@ -168,7 +169,7 @@ Selector and target allowlists are stored separately under `sessionTargetAllow(s
 **Events:**
 
 ```
-event SessionAdded(key_hash: felt252, expires_at: u64, max_calls: u32);
+event SessionAdded(key_hash: felt252, valid_after: u64, valid_until: u64, max_calls: u32);
 event SessionRevoked(key_hash: felt252);
 event SessionUsed(key_hash: felt252, used: u32);
 event SessionNonceAdvanced(key_hash: felt252, new_nonce: u128);
@@ -252,7 +253,7 @@ await ua.sessions.revoke(sess.id);
 ## 10. Security Considerations
 
 * **Domain separation:** Session signatures bind to `(chain_id, account_addr)`. ([docs.starknet.io][1])
-* **Expiry & limits:** Every session must have a hard `expires_at`; default small `maxCalls`.
+* **Expiry & limits:** Every session must declare `valid_after`/`valid_until`; default small `maxCalls`.
 * **Revocation:** `revokeSession(key_hash)` immediately blocks use. Events let dApps react.
 * **Replay protection:** Optional per-session nonce (`sessionNonce`) incremented in validation.
 * **Guardian griefing:** Require **m-of-n** quorum and **timelock**; owner can cancel a pending recovery.
@@ -265,7 +266,7 @@ await ua.sessions.revoke(sess.id);
 
 * **Validation path**: O(#calls * (selector + target checks)). Use **bitset/bitmap** encodings for selectors if needed; start with arrays for simplicity, upgrade later.
 * **Storage**: `calls_used` is incremented once per tx (after checking aggregate calls), not per inner call, to minimize writes.
-* **Policy packing**: keep `expires_at` in `u64`; `maxCalls` in `u32`; selectors as `felt252[]`.
+* **Policy packing**: keep `valid_after`/`valid_until` in `u64`; `maxCalls` in `u32`; selectors as `felt252[]`.
 
 ---
 
@@ -320,7 +321,7 @@ await ua.sessions.revoke(sess.id);
 **Events**
 
 ```
-event SessionAdded(key_hash: felt252, expires_at: u64, max_calls: u32);
+event SessionAdded(key_hash: felt252, valid_after: u64, valid_until: u64, max_calls: u32);
 event SessionRevoked(key_hash: felt252);
 event SessionUsed(key_hash: felt252, used: u32);
 event SessionNonceAdvanced(key_hash: felt252, new_nonce: u128);

@@ -160,7 +160,8 @@ Script: `packages/example/scripts/e2e-devnet.ts`
 1. Deploy UA² to devnet (or attach if auto-deployed by script).
 2. Create a session with:
 
-   * `expires_at = now + 2h`
+   * `valid_after = now`
+   * `valid_until = now + 2h`
    * `max_calls = 5`
    * selectors = `[transfer]`
    * targets = `[ERC20_TEST_ADDR]`

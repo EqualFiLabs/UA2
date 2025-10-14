@@ -122,16 +122,79 @@ cd ../../
 
 ---
 
-## 4) (Optional) Local devnet E2E
+## 4) Local devnet with `sncast` (Docker)
 
-If you run a local Starknet devnet:
+If you want to smoke-test on a local devnet before heading to Sepolia, run the same
+flow we use in CI. The commands below were copy/pasted against
+`shardlabs/starknet-devnet-rs:latest` and `sncast 0.33.x`.
 
 ```bash
-# Start a local devnet in another terminal (example; adjust to your stack)
-docker run --rm -p 5050:5050 shardlabs/starknet-devnet:latest
+# In a separate terminal
+docker run -it --rm -p 127.0.0.1:5050:5050 \
+  shardlabs/starknet-devnet-rs:latest \
+  --seed 0 --accounts 10
 ```
 
-Then run the JavaScript E2E against devnet:
+Back in the repo root:
+
+```bash
+RPC=http://127.0.0.1:5050
+NAME=devnet
+
+# 1. Create a named account (writes to ~/.starknet_accounts/devnet)
+sncast account create --name "$NAME" --url "$RPC"
+
+# 2. Fund it with FRI (STRK) for fees – copy the address from the previous output
+ADDR=0xPASTE_ADDRESS_FROM_OUTPUT
+curl -s "$RPC" -H 'content-type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"devnet_mint","params":{"address":"'"$ADDR"'","amount":100000000000000000000,"unit":"FRI"}}'
+
+# (Optional) give it some ETH (WEI) so you can test paymasters that refund in ETH
+curl -s "$RPC" -H 'content-type: application/json' \
+  -d '{"jsonrpc":"2.0","id":2,"method":"devnet_mint","params":{"address":"'"$ADDR"'","amount":100000000000000000000,"unit":"WEI"}}'
+
+# 3. Deploy the account (accept the default-account prompt)
+sncast account deploy --name "$NAME" --url "$RPC"
+
+# 4. Make sure scarb is discoverable (sncast shells out to it)
+scarb manifest-path
+
+# 5. Declare the UA² class (bump --max-fee if sncast suggests a higher estimate)
+sncast --account "$NAME" \
+  declare \
+  --contract-name UA2Account \
+  --url "$RPC" \
+  --max-fee 9638049920000000000
+
+# capture the class hash from the output
+UA2_CLASS_HASH=0xYOUR_CLASS_HASH
+
+# 6. Deploy the declared class (any felt pubkey works for local testing)
+OWNER_PUBKEY=0x4173f320ca395828b2630fdb693cfb761047fc3822a66c40f9156c4bc8d7836
+sncast --account "$NAME" \
+  deploy \
+  --class-hash "$UA2_CLASS_HASH" \
+  --constructor-calldata "$OWNER_PUBKEY" \
+  --url "$RPC" \
+  --max-fee 9638049920000000000
+
+# capture the proxy address for the next step
+UA2_ADDR=0xPASTE_DEPLOYED_ADDRESS
+
+# 7. Smoke test – zero-arg view, so no --calldata flag required
+sncast --account "$NAME" \
+  call \
+  --contract-address "$UA2_ADDR" \
+  --function get_owner \
+  --url "$RPC"
+```
+
+Every command above should succeed when pasted into a fresh shell. If a declare or
+deploy fails with "fee too low", rerun it with the quoted `--max-fee` adjusted to the
+estimate reported by `sncast`. Fees are denominated in **FRI (STRK)** on devnet.
+
+With the contract running locally you can point the demo app to the devnet values or
+run the TypeScript integration tests:
 
 ```bash
 npm run e2e:devnet
@@ -173,31 +236,59 @@ ua2_account = "${UA2_PROXY_ADDR}"
 
 ## 6) Declare & deploy on Sepolia
 
-From repo root:
+You can still use `./scripts/deploy_ua2.sh`, but when debugging or verifying
+interactively we recommend mirroring the devnet flow with `sncast` so the same
+commands work everywhere. Replace `<...>` placeholders before running.
 
 ```bash
 cd packages/contracts
 
-export STARKNET_RPC_URL=<YOUR_SEPOLIA_RPC>
-export UA2_OWNER_PUBKEY=<OWNER_PUBKEY_FELT>
-./scripts/deploy_ua2.sh
+RPC=https://starknet-sepolia.infura.io/v3/<YOUR_KEY>
+NAME=sepolia
 
-# Script output includes:
-# class hash:    0x...
-# contract_address: 0x...
+# 1. Create or reuse a named account backed by your keystore/ledger
+sncast account create --name "$NAME" --url "$RPC"
+sncast account deploy --name "$NAME" --url "$RPC"
+
+# 2. Declare the class (fees are in FRI/STRK; raise --max-fee if needed)
+sncast --account "$NAME" \
+  declare \
+  --contract-name UA2Account \
+  --url "$RPC" \
+  --max-fee 9638049920000000000
+
+UA2_CLASS_HASH=0xCLASS_HASH_FROM_OUTPUT
+
+# 3. Deploy the class to get a live proxy
+OWNER_PUBKEY=0xYOUR_OWNER_FELT
+sncast --account "$NAME" \
+  deploy \
+  --class-hash "$UA2_CLASS_HASH" \
+  --constructor-calldata "$OWNER_PUBKEY" \
+  --url "$RPC" \
+  --max-fee 9638049920000000000
+
+UA2_PROXY_ADDR=0xDEPLOYED_ADDRESS
+
+# 4. Verify with a read-only call (no calldata flag for zero-arg functions)
+sncast --account "$NAME" \
+  call \
+  --contract-address "$UA2_PROXY_ADDR" \
+  --function get_owner \
+  --url "$RPC"
 ```
 
-The script writes the resolved values to `packages/contracts/.ua2-sepolia-addresses.json`. Paste the
-latest entries into **`.env.sepolia`**:
+Copy the resulting `UA2_CLASS_HASH`, implementation address (from the deploy receipt),
+and `UA2_PROXY_ADDR` into `.env.sepolia` so the SDK and demo app target the right
+contracts. If `sncast` reports an estimated fee above the provided max, re-run the
+command with the suggested value.
 
-```
-UA2_CLASS_HASH=0x...
-UA2_IMPLEMENTATION_ADDR=0x...
-UA2_PROXY_ADDR=0x...
-NEXT_PUBLIC_UA2_PROXY_ADDR=0x...
-```
+When you prefer automation, `./scripts/deploy_ua2.sh` is still available and writes the
+same values into `packages/contracts/.ua2-sepolia-addresses.json`.
 
-Commit env (without secrets) or keep local. The `.env.sepolia.example` template matches these keys.
+> [!NOTE]
+> If you open a new shell before the smoke tests below, re-export `RPC` and `NAME`
+> so `sncast` can find the correct endpoint and account.
 
 ---
 
@@ -205,9 +296,11 @@ Commit env (without secrets) or keep local. The `.env.sepolia.example` template 
 
 ```bash
 # Read owner
-sncast --profile sepolia call \
-  --address $UA2_PROXY_ADDR \
-  --function get_owner
+sncast --account sepolia \
+  call \
+  --contract-address "$UA2_PROXY_ADDR" \
+  --function get_owner \
+  --url "$RPC"
 ```
 
 Expected:
@@ -220,8 +313,9 @@ Add a dummy session key (owner-signed tx):
 
 ```bash
 # Example: add session with 8h expiry, 50 max calls, single target, two selectors
-sncast --profile sepolia invoke \
-  --address $UA2_PROXY_ADDR \
+sncast --account sepolia \
+  invoke \
+  --contract-address "$UA2_PROXY_ADDR" \
   --function add_session_with_allowlists \
   --calldata \
     <SESSION_PUBKEY_FELT> \
@@ -234,10 +328,12 @@ sncast --profile sepolia invoke \
     <TARGET_CONTRACT_ADDR> \
     2 \
     <ALLOWED_SELECTOR_1> \
-    <ALLOWED_SELECTOR_2>
+    <ALLOWED_SELECTOR_2> \
+  --url "$RPC" \
+  --max-fee 9638049920000000000
 ```
 
-The calldata order is: session key, `is_active`, `expires_at`, `max_calls`, `calls_used`, `max_value_per_call.low`,
+The calldata order is: session key, `valid_after`, `valid_until`, `max_calls`, `max_value_per_call.low`,
 `max_value_per_call.high`, number of allowed targets, each target address, number of allowed selectors, each selector felt.
 If the contract checks revert, verify you supplied proper calldata as per `docs/interfaces.md`.
 

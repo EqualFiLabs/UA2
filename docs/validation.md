@@ -11,16 +11,19 @@
 1. Compute `key_hash` = pedersen(session_pubkey).
 2. Lookup the base `SessionPolicy` in `session` storage and fetch allowlist booleans from `session_target_allow` / `session_selector_allow` using `(key_hash, target)` and `(key_hash, selector)` keys.
 3. Require `is_active == true` (`ERR_SESSION_INACTIVE`).
-4. Require `block.timestamp <= expires_at` (`ERR_SESSION_EXPIRED`).
-5. Require `calls_used + tx_call_count <= max_calls` (`ERR_POLICY_CALLCAP`).
-6. For each call in `tx.multicall`:
+4. Require `block.timestamp >= valid_after` (`ERR_SESSION_NOT_READY`).
+5. Require `block.timestamp <= valid_until` (`ERR_SESSION_EXPIRED`).
+6. Require `calls_used + tx_call_count <= max_calls` (`ERR_POLICY_CALLCAP`).
+7. For each call in `tx.multicall`:
    - Assert target allowlist entry is `true` (`ERR_POLICY_TARGET_DENIED`).
    - Assert selector allowlist entry is `true` (`ERR_POLICY_SELECTOR_DENIED`).
-   - If selector == `ERC20::transfer`, ensure amount ≤ `max_value_per_call` (`ERR_VALUE_LIMIT_EXCEEDED`).
-7. Require provided session nonce == stored nonce (`ERR_BAD_SESSION_NONCE`).
-8. Verify ECDSA signature against the computed session message (`ERR_SESSION_SIG_INVALID`).
-9. Call `apply_session_usage` to atomically bump `calls_used`, advance the nonce, and emit `SessionUsed` + `SessionNonceAdvanced`.
-10. Proceed to `__execute__`.
+   - If selector == `ERC20::transfer` **or** `ERC20::transferFrom`, ensure amount ≤ `max_value_per_call` (`ERR_VALUE_LIMIT_EXCEEDED`).
+   - Direct native-token `call.value` transfers are out-of-scope in v0; stick to ERC-20 flows when using value caps.
+8. Require provided session nonce == stored nonce (`ERR_BAD_SESSION_NONCE`).
+9. Verify ECDSA signature against the computed session message (`ERR_SESSION_SIG_INVALID`).
+   - Message binds `{chainId, accountAddress, sessionPubkey, callHash, validUntil, nonce}` to prevent cross-channel replay.
+10. Call `apply_session_usage` to atomically bump `calls_used`, advance the nonce, and emit `SessionUsed` + `SessionNonceAdvanced`.
+11. Proceed to `__execute__`.
 
 If any check fails → revert with specific error code.
 

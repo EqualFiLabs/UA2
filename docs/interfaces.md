@@ -26,7 +26,8 @@
 ```rust
 struct SessionPolicy {
     is_active: bool,
-    expires_at: u64,
+    valid_after: u64,
+    valid_until: u64,
     max_calls: u32,
     calls_used: u32,
     max_value_per_call: Uint256,
@@ -35,11 +36,15 @@ struct SessionPolicy {
 
 The selector and target allowlists are not embedded in the struct. They are stored in dedicated `LegacyMap` slots keyed by `(key_hash, target)` and `(key_hash, selector)` respectively, and are populated by calling `add_session_with_allowlists` alongside the base policy.
 
+> **Notes:**
+> * Supplying empty target and selector lists is permitted, but such a session cannot execute any calls (all lookups fall back to `false`).
+> * To keep storage writes + gas predictable in v0, prefer allowlists with ≲32 entries per list.
+
 ---
 
 ## Events
 
-* `SessionAdded(key_hash: felt252, expires_at: u64, max_calls: u32)`
+* `SessionAdded(key_hash: felt252, valid_after: u64, valid_until: u64, max_calls: u32)`
 * `SessionRevoked(key_hash: felt252)`
 * `SessionUsed(key_hash: felt252, used: u32)`
 * `SessionNonceAdvanced(key_hash: felt252, new_nonce: u128)`
@@ -61,15 +66,25 @@ The contract reverts with the following identifiers:
 
 * `ERR_SESSION_EXPIRED`
 * `ERR_SESSION_INACTIVE`
+* `ERR_SESSION_STALE`
+* `ERR_SESSION_NOT_READY`
+* `ERR_SESSION_TARGETS_LEN`
+* `ERR_SESSION_SELECTORS_LEN`
 * `ERR_POLICY_CALLCAP`
-* `ERR_POLICY_SELECTOR_DENIED`
 * `ERR_POLICY_TARGET_DENIED`
-* `ERR_VALUE_LIMIT_EXCEEDED`
+* `ERR_POLICY_SELECTOR_DENIED`
 * `ERR_POLICY_CALLCOUNT_MISMATCH`
+* `ERR_VALUE_LIMIT_EXCEEDED`
 * `ERR_BAD_SESSION_NONCE`
 * `ERR_SESSION_SIG_INVALID`
+* `ERR_BAD_VALID_WINDOW`
+* `ERR_BAD_MAX_CALLS`
+* `ERR_SIGNATURE_MISSING`
+* `ERR_OWNER_SIG_INVALID`
+* `ERR_GUARDIAN_SIG_INVALID`
 * `ERR_GUARDIAN_EXISTS`
 * `ERR_NOT_GUARDIAN`
+* `ERR_GUARDIAN_CALL_DENIED`
 * `ERR_BAD_THRESHOLD`
 * `ERR_RECOVERY_IN_PROGRESS`
 * `ERR_NO_RECOVERY`
@@ -77,6 +92,7 @@ The contract reverts with the following identifiers:
 * `ERR_ALREADY_CONFIRMED`
 * `ERR_BEFORE_ETA`
 * `ERR_NOT_ENOUGH_CONFIRMS`
+* `ERR_NOT_OWNER`
 * `ERR_ZERO_OWNER`
 * `ERR_SAME_OWNER`
 

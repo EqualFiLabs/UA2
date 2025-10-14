@@ -25,7 +25,7 @@ export interface Toolkit {
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const PROJECT_ROOT = path.resolve(__dirname, '../../..');
+export const PROJECT_ROOT = path.resolve(__dirname, '../../..');
 const CONTRACTS_ROOT = path.resolve(PROJECT_ROOT, 'packages/contracts');
 
 export class AccountCallTransport implements CallTransport {
@@ -233,6 +233,12 @@ export function normalizeHex(value: string): Felt {
   return ('0x' + hex) as Felt;
 }
 
+export function deriveSessionKeyHash(pubkey: Felt): Felt {
+  const normalizedKey = normalizeHex(pubkey);
+  const hashValue = hash.computePedersenHash(normalizedKey, '0x0');
+  return normalizeHex(hashValue);
+}
+
 export function normalizePrivateKey(value: string): string {
   const trimmed = value.trim();
   return trimmed.startsWith('0x') || trimmed.startsWith('0X') ? trimmed : `0x${trimmed}`;
@@ -324,6 +330,12 @@ export function toFelt(value: number | bigint | string): Felt {
 
 export function selectorFor(name: string): Felt {
   return normalizeHex(hash.getSelectorFromName(name));
+}
+
+export function logReceipt(label: string, txHash: string, receipt: any): void {
+  const status = receipt?.finality_status ?? receipt?.status ?? 'UNKNOWN';
+  const execution = receipt?.execution_status ?? 'UNKNOWN';
+  console.log(`  • ${label}: tx=${txHash} finality=${status} execution=${execution}`);
 }
 
 export interface SessionUsageState {

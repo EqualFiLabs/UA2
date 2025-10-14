@@ -3,25 +3,39 @@ use core::result::ResultTrait;
 use core::traits::{Into, TryInto};
 use snforge_std::{
     declare,
+    spy_events,
     start_cheat_block_timestamp,
     stop_cheat_block_timestamp,
     start_cheat_caller_address,
     stop_cheat_caller_address,
     ContractClassTrait,
     DeclareResultTrait,
+    EventSpyAssertionsTrait,
 };
 use starknet::{ContractAddress, SyscallResult, SyscallResultTrait};
 use starknet::syscalls::call_contract_syscall;
+use ua2_contracts::errors::{
+    ERR_ALREADY_CONFIRMED,
+    ERR_BEFORE_ETA,
+    ERR_NO_RECOVERY,
+    ERR_NOT_ENOUGH_CONFIRMS,
+    ERR_RECOVERY_IN_PROGRESS,
+    ERR_RECOVERY_MISMATCH,
+};
+use ua2_contracts::ua2_account::UA2Account::{
+    Event,
+    GuardianFinalized,
+    GuardianProposed,
+    OwnerRotated,
+    RecoveryCanceled,
+    RecoveryConfirmed,
+    RecoveryExecuted,
+    RecoveryProposed,
+};
 
 const OWNER_PUBKEY: felt252 = 0x12345;
 const RECOVERY_OWNER_A: felt252 = 0xAAA111;
 const RECOVERY_OWNER_B: felt252 = 0xBBB222;
-const ERR_NOT_ENOUGH_CONFIRMS: felt252 = 'ERR_NOT_ENOUGH_CONFIRMS';
-const ERR_RECOVERY_IN_PROGRESS: felt252 = 'ERR_RECOVERY_IN_PROGRESS';
-const ERR_RECOVERY_MISMATCH: felt252 = 'ERR_RECOVERY_MISMATCH';
-const ERR_ALREADY_CONFIRMED: felt252 = 'ERR_ALREADY_CONFIRMED';
-const ERR_BEFORE_ETA: felt252 = 'ERR_BEFORE_ETA';
-const ERR_NO_RECOVERY: felt252 = 'ERR_NO_RECOVERY';
 
 fn deploy_account() -> ContractAddress {
     let declare_result = declare("UA2Account").unwrap();
@@ -236,4 +250,404 @@ fn recovery_edge_cases() {
     stop_cheat_caller_address(contract_address);
 
     stop_cheat_block_timestamp(contract_address);
+}
+
+#[test]
+fn recovery_cancel_emits_event() {
+    let contract_address = deploy_account();
+    let g1: ContractAddress = 0x111.try_into().unwrap();
+
+    start_cheat_caller_address(contract_address, contract_address);
+    let mut add_calldata = array![];
+    add_calldata.append(g1.into());
+    call_contract_syscall(
+        contract_address,
+        starknet::selector!("add_guardian"),
+        add_calldata.span(),
+    )
+    .unwrap_syscall();
+
+    let mut threshold_calldata = array![];
+    threshold_calldata.append(1_u8.into());
+    call_contract_syscall(
+        contract_address,
+        starknet::selector!("set_guardian_threshold"),
+        threshold_calldata.span(),
+    )
+    .unwrap_syscall();
+
+    let mut delay_calldata = array![];
+    delay_calldata.append(0_u64.into());
+    call_contract_syscall(
+        contract_address,
+        starknet::selector!("set_recovery_delay"),
+        delay_calldata.span(),
+    )
+    .unwrap_syscall();
+    stop_cheat_caller_address(contract_address);
+
+    let mut spy = spy_events();
+
+    start_cheat_block_timestamp(contract_address, 10_u64);
+
+    start_cheat_caller_address(contract_address, g1);
+    let mut propose_calldata = array![];
+    propose_calldata.append(RECOVERY_OWNER_A);
+    call_contract_syscall(
+        contract_address,
+        starknet::selector!("propose_recovery"),
+        propose_calldata.span(),
+    )
+    .unwrap_syscall();
+    stop_cheat_caller_address(contract_address);
+
+    start_cheat_caller_address(contract_address, contract_address);
+    let empty = array![];
+    call_contract_syscall(
+        contract_address,
+        starknet::selector!("cancel_recovery"),
+        empty.span(),
+    )
+    .unwrap_syscall();
+    stop_cheat_caller_address(contract_address);
+
+    stop_cheat_block_timestamp(contract_address);
+
+    spy.assert_emitted(@array![
+        (
+            contract_address,
+            Event::RecoveryConfirmed(RecoveryConfirmed {
+                guardian: g1,
+                new_owner: RECOVERY_OWNER_A,
+                count: 1_u32,
+            }),
+        ),
+        (
+            contract_address,
+            Event::GuardianProposed(GuardianProposed {
+                guardian: g1,
+                proposal_id: 1_u64,
+                new_owner: RECOVERY_OWNER_A,
+                eta: 10_u64,
+            }),
+        ),
+        (
+            contract_address,
+            Event::RecoveryProposed(RecoveryProposed {
+                new_owner: RECOVERY_OWNER_A,
+                eta: 10_u64,
+            }),
+        ),
+        (
+            contract_address,
+            Event::RecoveryCanceled(RecoveryCanceled {}),
+        ),
+    ]);
+}
+
+#[test]
+fn test_guardian_timelock_enforced() {
+    let contract_address = deploy_account();
+    let g1: ContractAddress = 0x111.try_into().unwrap();
+
+    start_cheat_caller_address(contract_address, contract_address);
+    let mut add_calldata = array![];
+    add_calldata.append(g1.into());
+    call_contract_syscall(
+        contract_address,
+        starknet::selector!("add_guardian"),
+        add_calldata.span(),
+    )
+    .unwrap_syscall();
+
+    let mut threshold_calldata = array![];
+    threshold_calldata.append(1_u8.into());
+    call_contract_syscall(
+        contract_address,
+        starknet::selector!("set_guardian_threshold"),
+        threshold_calldata.span(),
+    )
+    .unwrap_syscall();
+
+    let mut delay_calldata = array![];
+    delay_calldata.append(500_u64.into());
+    call_contract_syscall(
+        contract_address,
+        starknet::selector!("set_recovery_delay"),
+        delay_calldata.span(),
+    )
+    .unwrap_syscall();
+    stop_cheat_caller_address(contract_address);
+
+    start_cheat_block_timestamp(contract_address, 100_u64);
+
+    start_cheat_caller_address(contract_address, g1);
+    let mut propose_calldata = array![];
+    propose_calldata.append(RECOVERY_OWNER_A);
+    call_contract_syscall(
+        contract_address,
+        starknet::selector!("propose_recovery"),
+        propose_calldata.span(),
+    )
+    .unwrap_syscall();
+
+    let mut execute_calldata = array![];
+    let before_eta = call_contract_syscall(
+        contract_address,
+        starknet::selector!("execute_recovery"),
+        execute_calldata.span(),
+    );
+    stop_cheat_caller_address(contract_address);
+
+    stop_cheat_block_timestamp(contract_address);
+
+    assert_reverted_with(before_eta, ERR_BEFORE_ETA);
+}
+
+#[test]
+fn test_guardian_finalize() {
+    let contract_address = deploy_account();
+    let g1: ContractAddress = 0x111.try_into().unwrap();
+    let g2: ContractAddress = 0x222.try_into().unwrap();
+
+    start_cheat_caller_address(contract_address, contract_address);
+    let mut add_one = array![];
+    add_one.append(g1.into());
+    call_contract_syscall(
+        contract_address,
+        starknet::selector!("add_guardian"),
+        add_one.span(),
+    )
+    .unwrap_syscall();
+
+    let mut add_two = array![];
+    add_two.append(g2.into());
+    call_contract_syscall(
+        contract_address,
+        starknet::selector!("add_guardian"),
+        add_two.span(),
+    )
+    .unwrap_syscall();
+
+    let mut threshold_calldata = array![];
+    threshold_calldata.append(2_u8.into());
+    call_contract_syscall(
+        contract_address,
+        starknet::selector!("set_guardian_threshold"),
+        threshold_calldata.span(),
+    )
+    .unwrap_syscall();
+
+    let mut delay_calldata = array![];
+    delay_calldata.append(0_u64.into());
+    call_contract_syscall(
+        contract_address,
+        starknet::selector!("set_recovery_delay"),
+        delay_calldata.span(),
+    )
+    .unwrap_syscall();
+    stop_cheat_caller_address(contract_address);
+
+    let mut spy = spy_events();
+
+    start_cheat_block_timestamp(contract_address, 500_u64);
+
+    start_cheat_caller_address(contract_address, g1);
+    let mut propose_calldata = array![];
+    propose_calldata.append(RECOVERY_OWNER_A);
+    call_contract_syscall(
+        contract_address,
+        starknet::selector!("propose_recovery"),
+        propose_calldata.span(),
+    )
+    .unwrap_syscall();
+    stop_cheat_caller_address(contract_address);
+
+    start_cheat_caller_address(contract_address, g2);
+    let mut confirm_calldata = array![];
+    confirm_calldata.append(RECOVERY_OWNER_A);
+    call_contract_syscall(
+        contract_address,
+        starknet::selector!("confirm_recovery"),
+        confirm_calldata.span(),
+    )
+    .unwrap_syscall();
+    stop_cheat_caller_address(contract_address);
+
+    start_cheat_caller_address(contract_address, g1);
+    let mut execute_calldata = array![];
+    call_contract_syscall(
+        contract_address,
+        starknet::selector!("execute_recovery"),
+        execute_calldata.span(),
+    )
+    .unwrap_syscall();
+    stop_cheat_caller_address(contract_address);
+
+    stop_cheat_block_timestamp(contract_address);
+
+    let mut empty = array![];
+    let owner_result = call_contract_syscall(
+        contract_address,
+        starknet::selector!("get_owner"),
+        empty.span(),
+    )
+    .unwrap_syscall();
+    let owner = *owner_result.at(0_usize);
+    assert(owner == RECOVERY_OWNER_A, 'owner not rotated by guardians');
+
+    spy.assert_emitted(@array![
+        (
+            contract_address,
+            Event::RecoveryConfirmed(RecoveryConfirmed {
+                guardian: g1,
+                new_owner: RECOVERY_OWNER_A,
+                count: 1_u32,
+            }),
+        ),
+        (
+            contract_address,
+            Event::GuardianProposed(GuardianProposed {
+                guardian: g1,
+                proposal_id: 1_u64,
+                new_owner: RECOVERY_OWNER_A,
+                eta: 500_u64,
+            }),
+        ),
+        (
+            contract_address,
+            Event::RecoveryProposed(RecoveryProposed {
+                new_owner: RECOVERY_OWNER_A,
+                eta: 500_u64,
+            }),
+        ),
+        (
+            contract_address,
+            Event::RecoveryConfirmed(RecoveryConfirmed {
+                guardian: g2,
+                new_owner: RECOVERY_OWNER_A,
+                count: 2_u32,
+            }),
+        ),
+        (
+            contract_address,
+            Event::OwnerRotated(OwnerRotated { new_owner: RECOVERY_OWNER_A }),
+        ),
+        (
+            contract_address,
+            Event::RecoveryExecuted(RecoveryExecuted { new_owner: RECOVERY_OWNER_A }),
+        ),
+        (
+            contract_address,
+            Event::GuardianFinalized(GuardianFinalized {
+                guardian: g1,
+                proposal_id: 1_u64,
+                new_owner: RECOVERY_OWNER_A,
+            }),
+        ),
+    ]);
+}
+
+#[test]
+fn test_guardian_cancel() {
+    let contract_address = deploy_account();
+    let g1: ContractAddress = 0x111.try_into().unwrap();
+
+    start_cheat_caller_address(contract_address, contract_address);
+    let mut add_calldata = array![];
+    add_calldata.append(g1.into());
+    call_contract_syscall(
+        contract_address,
+        starknet::selector!("add_guardian"),
+        add_calldata.span(),
+    )
+    .unwrap_syscall();
+
+    let mut threshold_calldata = array![];
+    threshold_calldata.append(1_u8.into());
+    call_contract_syscall(
+        contract_address,
+        starknet::selector!("set_guardian_threshold"),
+        threshold_calldata.span(),
+    )
+    .unwrap_syscall();
+
+    let mut delay_calldata = array![];
+    delay_calldata.append(10_u64.into());
+    call_contract_syscall(
+        contract_address,
+        starknet::selector!("set_recovery_delay"),
+        delay_calldata.span(),
+    )
+    .unwrap_syscall();
+    stop_cheat_caller_address(contract_address);
+
+    let mut spy = spy_events();
+
+    start_cheat_block_timestamp(contract_address, 42_u64);
+
+    start_cheat_caller_address(contract_address, g1);
+    let mut propose_calldata = array![];
+    propose_calldata.append(RECOVERY_OWNER_A);
+    call_contract_syscall(
+        contract_address,
+        starknet::selector!("propose_recovery"),
+        propose_calldata.span(),
+    )
+    .unwrap_syscall();
+    stop_cheat_caller_address(contract_address);
+
+    start_cheat_caller_address(contract_address, contract_address);
+    let mut cancel_calldata = array![];
+    call_contract_syscall(
+        contract_address,
+        starknet::selector!("cancel_recovery"),
+        cancel_calldata.span(),
+    )
+    .unwrap_syscall();
+    stop_cheat_caller_address(contract_address);
+
+    start_cheat_caller_address(contract_address, g1);
+    let mut execute_calldata = array![];
+    let no_recovery = call_contract_syscall(
+        contract_address,
+        starknet::selector!("execute_recovery"),
+        execute_calldata.span(),
+    );
+    stop_cheat_caller_address(contract_address);
+
+    stop_cheat_block_timestamp(contract_address);
+
+    assert_reverted_with(no_recovery, ERR_NO_RECOVERY);
+
+    spy.assert_emitted(@array![
+        (
+            contract_address,
+            Event::RecoveryConfirmed(RecoveryConfirmed {
+                guardian: g1,
+                new_owner: RECOVERY_OWNER_A,
+                count: 1_u32,
+            }),
+        ),
+        (
+            contract_address,
+            Event::GuardianProposed(GuardianProposed {
+                guardian: g1,
+                proposal_id: 1_u64,
+                new_owner: RECOVERY_OWNER_A,
+                eta: 52_u64,
+            }),
+        ),
+        (
+            contract_address,
+            Event::RecoveryProposed(RecoveryProposed {
+                new_owner: RECOVERY_OWNER_A,
+                eta: 52_u64,
+            }),
+        ),
+        (
+            contract_address,
+            Event::RecoveryCanceled(RecoveryCanceled {}),
+        ),
+    ]);
 }

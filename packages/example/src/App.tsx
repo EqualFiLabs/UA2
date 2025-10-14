@@ -254,9 +254,10 @@ function SessionCreateForm({ create, isReady }: SessionCreateFormProps): JSX.Ele
         throw new Error('Expiry must be a positive number of minutes.');
       }
       const maxValueBigInt = BigInt(maxValue);
-      const expiresAt = Math.floor(Date.now() / 1000) + parsedExpires * 60;
+      const validAfter = Math.floor(Date.now() / 1000);
       const policy = {
-        expiresAt,
+        validAfter,
+        validUntil: validAfter + parsedExpires * 60,
         limits: limits(parsedMaxCalls, maxValueBigInt),
         allow: {
           targets: target.trim() ? [target.trim()] : [],
@@ -428,7 +429,7 @@ function SessionList({ sessions, revoke, refresh, client }: SessionListProps): J
                 </span>
               </div>
               <div className="session-note">
-                Expires at: {session.policy.expiresAt} · Max calls: {session.policy.limits.maxCalls}
+                Expires at: {session.policy.validUntil} · Max calls: {session.policy.limits.maxCalls}
               </div>
               <button
                 className={`${secondaryButtonClass} session-item__action`}

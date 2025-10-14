@@ -72,8 +72,10 @@ pub mod session_test_utils {
 
     fn compute_message(
         account_address: ContractAddress,
+        session_pubkey: felt252,
         key_hash: felt252,
         nonce: u128,
+        valid_until: u64,
         calls: @Array<Call>,
     ) -> felt252 {
         let execution_info = get_execution_info().unbox();
@@ -85,9 +87,11 @@ pub mod session_test_utils {
             SESSION_DOMAIN_TAG,
             chain_id,
             account_felt,
+            session_pubkey,
             key_hash,
-            nonce.into(),
             call_digest,
+            valid_until.into(),
+            nonce.into(),
         ];
         poseidon_hash_span(values.span())
     }
@@ -108,10 +112,11 @@ pub mod session_test_utils {
         account_address: ContractAddress,
         session_pubkey: felt252,
         nonce: u128,
+        valid_until: u64,
         calls: @Array<Call>,
     ) -> Array<felt252> {
         let key_hash = pedersen(session_pubkey, 0);
-        let message = compute_message(account_address, key_hash, nonce, calls);
+        let message = compute_message(account_address, session_pubkey, key_hash, nonce, valid_until, calls);
         let key_pair = session_keypair();
         let signature = StarkCurveSignerImpl::sign(key_pair, message);
         let (r, s) = match signature {

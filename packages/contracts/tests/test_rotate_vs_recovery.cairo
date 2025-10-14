@@ -10,9 +10,9 @@ use snforge_std::{
 };
 use starknet::{ContractAddress, SyscallResult, SyscallResultTrait};
 use starknet::syscalls::call_contract_syscall;
+use ua2_contracts::errors::ERR_RECOVERY_IN_PROGRESS;
 
 const OWNER_PUBKEY: felt252 = 0x111;
-const ERR_RECOVERY_IN_PROGRESS: felt252 = 'ERR_RECOVERY_IN_PROGRESS';
 const NEW_RECOVERY_OWNER: felt252 = 0xDEAD;
 const ROTATED_OWNER: felt252 = 0xBEEF;
 

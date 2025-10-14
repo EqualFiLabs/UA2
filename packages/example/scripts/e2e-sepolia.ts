@@ -5,7 +5,9 @@ import {
   AccountCallTransport,
   assertReverted,
   assertSucceeded,
+  deriveSessionKeyHash,
   initialSessionUsageState,
+  logReceipt,
   optionalEnv,
   readOwner,
   selectorFor,
@@ -13,113 +15,189 @@ import {
   toFelt,
   updateSessionUsage,
   waitForReceipt,
-  type Network,
+  normalizeHex,
 } from './shared.js';
 
-async function main(): Promise<void> {
-  const network: Network = 'sepolia';
-  const toolkit = await setupToolkit(network);
+const RECEIPT_TIMEOUT_MS = 240_000;
 
-  const ua2Address = optionalEnv([
-    `UA2_${network.toUpperCase()}_PROXY_ADDR`,
+async function main(): Promise<void> {
+  console.log('[ua2] e2e sepolia (attach-only) starting');
+
+  const toolkit = await setupToolkit('sepolia');
+
+  const ua2AddressRaw = optionalEnv([
+    'UA2_SEPOLIA_PROXY_ADDR',
     'UA2_PROXY_ADDR',
+    'UA2_ADDR',
   ]);
-  if (!ua2Address) {
+  if (!ua2AddressRaw) {
     throw new Error('UA2_PROXY_ADDR is required for Sepolia E2E runs.');
   }
 
-  const normalizedAddress = ua2Address;
-  const ownerAccount = new Account(toolkit.provider, normalizedAddress, toolkit.ownerKey);
-  const ownerTransport = new AccountCallTransport(ownerAccount);
+  const ua2Address = normalizeHex(ua2AddressRaw);
+  console.log(`[ua2] attaching to UA² account ${ua2Address}`);
 
-  const ownerBefore = await readOwner(toolkit.provider, normalizedAddress);
-  if (ownerBefore.toLowerCase() !== toolkit.ownerPubKey.toLowerCase()) {
+  const ownerOnChain = await readOwner(toolkit.provider, ua2Address);
+  if (ownerOnChain.toLowerCase() !== toolkit.ownerPubKey.toLowerCase()) {
     console.warn(
-      `[ua2] Warning: UA² owner on-chain (${ownerBefore}) does not match configured owner pubkey (${toolkit.ownerPubKey}).`
+      `[ua2] warning: on-chain owner ${ownerOnChain} differs from configured owner ${toolkit.ownerPubKey}`
     );
   }
 
-  console.log('E2E SEPOLIA');
-  console.log(`- attach ✓ (${normalizedAddress})`);
+  const ownerAccount = new Account(toolkit.provider, ua2Address, toolkit.ownerKey);
+  const ownerTransport = new AccountCallTransport(ownerAccount);
 
   const sessions = makeSessionsManager({
-    account: { address: normalizedAddress, chainId: toolkit.chainId },
+    account: { address: ua2Address, chainId: toolkit.chainId },
     transport: ownerTransport,
-    ua2Address: normalizedAddress,
+    ua2Address,
   });
 
-  const expiresAt = Math.floor(Date.now() / 1000) + 2 * 60 * 60;
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const validAfter = nowSeconds - 60;
+  const validUntil = validAfter + 30 * 60;
   const sessionTargetValue =
     optionalEnv(
-      [`UA2_${network.toUpperCase()}_SESSION_TARGET`, 'UA2_SESSION_TARGET', 'UA2_E2E_TARGET_ADDR'],
+      ['UA2_SEPOLIA_SESSION_TARGET', 'UA2_SESSION_TARGET', 'UA2_E2E_TARGET_ADDR'],
       toolkit.guardianAddress
     ) ?? toolkit.guardianAddress;
   const sessionTarget = toFelt(sessionTargetValue);
   const transferSelector = selectorFor('transfer');
 
   const policy: SessionPolicyInput = {
-    expiresAt,
-    limits: limits(5, 10n ** 15n),
+    validAfter,
+    validUntil,
+    limits: limits(1, 10n ** 15n),
     allow: {
       targets: [sessionTarget],
       selectors: [transferSelector],
     },
+    active: true,
   };
 
+  console.log('\n[1] create tight session policy');
   const session = await sessions.create(policy);
   if (!ownerTransport.lastTxHash) {
-    throw new Error('Session creation did not produce a transaction hash.');
+    throw new Error('add_session_with_allowlists did not emit a transaction hash');
   }
-  const createReceipt = await waitForReceipt(toolkit.provider, ownerTransport.lastTxHash, 'session create');
-  assertSucceeded(createReceipt, 'session create');
-  logReceipt('create session', ownerTransport.lastTxHash, createReceipt);
+  const sessionReceipt = await waitForReceipt(
+    toolkit.provider,
+    ownerTransport.lastTxHash,
+    'create session',
+    RECEIPT_TIMEOUT_MS
+  );
+  assertSucceeded(sessionReceipt, 'create session');
+  logReceipt('create session', ownerTransport.lastTxHash, sessionReceipt);
+
+  const sessionKeyHash = deriveSessionKeyHash(session.pubkey);
+  console.log(`[ua2] session key hash ${sessionKeyHash}`);
 
   let usage = initialSessionUsageState();
 
-  usage = await applySessionUsage(toolkit, ownerAccount, normalizedAddress, session.id, usage, 1, 'session use #1');
-  usage = await applySessionUsage(toolkit, ownerAccount, normalizedAddress, session.id, usage, 1, 'session use #2');
-  const third = await applySessionUsage(toolkit, ownerAccount, normalizedAddress, session.id, usage, 1, 'session use #3');
-  usage = third;
-  console.log('- call via session ✓');
+  console.log('[2] in-policy session call succeeds');
+  usage = await expectSessionUsageSuccess(
+    toolkit,
+    ownerAccount,
+    ua2Address,
+    sessionKeyHash,
+    usage,
+    1,
+    'in-policy session call'
+  );
 
+  console.log('[3] out-of-policy session call reverts (ERR_POLICY_CALLCAP)');
+  await expectSessionUsageRevert(
+    toolkit,
+    ownerAccount,
+    ua2Address,
+    sessionKeyHash,
+    usage,
+    1,
+    'out-of-policy session call',
+    'ERR_POLICY_CALLCAP'
+  );
+
+  console.log('[4] revoke session');
   const revokeTx = await ownerAccount.execute({
-    contractAddress: normalizedAddress,
+    contractAddress: ua2Address,
     entrypoint: 'revoke_session',
-    calldata: [session.id],
+    calldata: [sessionKeyHash],
   });
-  const revokeReceipt = await waitForReceipt(toolkit.provider, revokeTx.transaction_hash, 'session revoke');
-  assertSucceeded(revokeReceipt, 'session revoke');
+  const revokeReceipt = await waitForReceipt(
+    toolkit.provider,
+    revokeTx.transaction_hash,
+    'revoke session',
+    RECEIPT_TIMEOUT_MS
+  );
+  assertSucceeded(revokeReceipt, 'revoke session');
   logReceipt('revoke session', revokeTx.transaction_hash, revokeReceipt);
 
-  const postRevokeTx = await ownerAccount.execute({
-    contractAddress: normalizedAddress,
-    entrypoint: 'apply_session_usage',
-    calldata: [
-      session.id,
-      toFelt(usage.callsUsed),
-      toFelt(1),
-      toFelt(usage.nonce),
-    ],
-  });
-  const postRevokeReceipt = await waitForReceipt(
-    toolkit.provider,
-    postRevokeTx.transaction_hash,
-    'post-revoke session usage'
+  console.log('[5] session call after revoke reverts (ERR_SESSION_INACTIVE)');
+  await expectSessionUsageRevert(
+    toolkit,
+    ownerAccount,
+    ua2Address,
+    sessionKeyHash,
+    usage,
+    1,
+    'post-revoke session call',
+    'ERR_SESSION_INACTIVE'
   );
-  assertReverted(postRevokeReceipt, 'ERR_SESSION_INACTIVE', 'post revoke session use');
-  logReceipt('post-revoke session', postRevokeTx.transaction_hash, postRevokeReceipt);
 
-  await runGuardianRecovery(toolkit, normalizedAddress);
-  console.log('- guardian recovery ✓');
-
-  console.log('E2E SEPOLIA ✓ complete');
+  console.log('\nUA² sepolia e2e PASS ✅');
 }
 
-async function applySessionUsage(
+async function expectSessionUsageSuccess(
   toolkit: Awaited<ReturnType<typeof setupToolkit>>,
   owner: Account,
   ua2Address: string,
-  sessionId: string,
+  sessionKeyHash: string,
+  state: ReturnType<typeof initialSessionUsageState>,
+  calls: number,
+  label: string
+) {
+  const { receipt, txHash } = await sendApplySessionUsage(
+    toolkit,
+    owner,
+    ua2Address,
+    sessionKeyHash,
+    state,
+    calls,
+    label
+  );
+  assertSucceeded(receipt, label);
+  logReceipt(label, txHash, receipt);
+  return updateSessionUsage(state, calls);
+}
+
+async function expectSessionUsageRevert(
+  toolkit: Awaited<ReturnType<typeof setupToolkit>>,
+  owner: Account,
+  ua2Address: string,
+  sessionKeyHash: string,
+  state: ReturnType<typeof initialSessionUsageState>,
+  calls: number,
+  label: string,
+  expectedReason: string
+): Promise<void> {
+  const { receipt, txHash } = await sendApplySessionUsage(
+    toolkit,
+    owner,
+    ua2Address,
+    sessionKeyHash,
+    state,
+    calls,
+    label
+  );
+  assertReverted(receipt, expectedReason, label);
+  logReceipt(label, txHash, receipt);
+}
+
+async function sendApplySessionUsage(
+  toolkit: Awaited<ReturnType<typeof setupToolkit>>,
+  owner: Account,
+  ua2Address: string,
+  sessionKeyHash: string,
   state: ReturnType<typeof initialSessionUsageState>,
   calls: number,
   label: string
@@ -128,101 +206,22 @@ async function applySessionUsage(
     contractAddress: ua2Address,
     entrypoint: 'apply_session_usage',
     calldata: [
-      sessionId,
+      sessionKeyHash,
       toFelt(state.callsUsed),
       toFelt(calls),
       toFelt(state.nonce),
     ],
   });
-  const receipt = await waitForReceipt(toolkit.provider, tx.transaction_hash, label);
-  assertSucceeded(receipt, label);
-  logReceipt(label, tx.transaction_hash, receipt);
-  return updateSessionUsage(state, calls);
-}
-
-async function runGuardianRecovery(toolkit: Awaited<ReturnType<typeof setupToolkit>>, ua2Address: string) {
-  const ownerAccount = new Account(toolkit.provider, ua2Address, toolkit.ownerKey);
-
-  await sendAndAwait(toolkit, ownerAccount, ua2Address, 'add_guardian', [toolkit.guardianAddress], 'add guardian', [
-    'ERR_GUARDIAN_EXISTS',
-  ]);
-  await sendAndAwait(toolkit, ownerAccount, ua2Address, 'set_guardian_threshold', [toFelt(1)], 'set guardian threshold');
-  await sendAndAwait(toolkit, ownerAccount, ua2Address, 'set_recovery_delay', [toFelt(0)], 'set recovery delay');
-
-  const guardianPropose = await toolkit.guardian.execute({
-    contractAddress: ua2Address,
-    entrypoint: 'propose_recovery',
-    calldata: [toolkit.guardianPubKey],
-  });
-  const guardianProposeReceipt = await waitForReceipt(
+  const receipt = await waitForReceipt(
     toolkit.provider,
-    guardianPropose.transaction_hash,
-    'guardian propose recovery'
+    tx.transaction_hash,
+    label,
+    RECEIPT_TIMEOUT_MS
   );
-  assertSucceeded(guardianProposeReceipt, 'guardian propose recovery');
-  logReceipt('guardian propose recovery', guardianPropose.transaction_hash, guardianProposeReceipt);
-
-  const executeTx = await toolkit.guardian.execute({
-    contractAddress: ua2Address,
-    entrypoint: 'execute_recovery',
-    calldata: [],
-  });
-  const executeReceipt = await waitForReceipt(toolkit.provider, executeTx.transaction_hash, 'execute recovery');
-  assertSucceeded(executeReceipt, 'execute recovery');
-  logReceipt('guardian execute recovery', executeTx.transaction_hash, executeReceipt);
-
-  const ownerAfter = await readOwner(toolkit.provider, ua2Address);
-  if (ownerAfter.toLowerCase() !== toolkit.guardianPubKey.toLowerCase()) {
-    throw new Error(`Recovery did not update owner. expected ${toolkit.guardianPubKey}, got ${ownerAfter}`);
-  }
-
-  const recoveredOwner = new Account(toolkit.provider, ua2Address, toolkit.guardianKey);
-  await sendAndAwait(
-    toolkit,
-    recoveredOwner,
-    ua2Address,
-    'rotate_owner',
-    [toolkit.ownerPubKey],
-    'rotate owner back'
-  );
-}
-
-async function sendAndAwait(
-  toolkit: Awaited<ReturnType<typeof setupToolkit>>,
-  signer: Account,
-  ua2Address: string,
-  entrypoint: string,
-  calldata: readonly string[],
-  label: string,
-  ignorableReasons: string[] = []
-): Promise<void> {
-  const tx = await signer.execute({
-    contractAddress: ua2Address,
-    entrypoint,
-    calldata: [...calldata],
-  });
-  const receipt = await waitForReceipt(toolkit.provider, tx.transaction_hash, label);
-  const execution = (receipt?.execution_status ?? '').toString();
-  if (execution === 'REVERTED') {
-    const reason = (receipt?.revert_reason ?? '').toString();
-    if (ignorableReasons.some((expected) => reason.includes(expected))) {
-      return;
-    }
-    throw new Error(`${label} failed: ${reason || 'unknown revert reason'}`);
-  }
-  assertSucceeded(receipt, label);
-  logReceipt(label, tx.transaction_hash, receipt);
-}
-
-function logReceipt(label: string, txHash: string, receipt: any): void {
-  const status = receipt?.finality_status ?? receipt?.status ?? 'UNKNOWN';
-  const execution = receipt?.execution_status ?? 'UNKNOWN';
-  console.log(
-    `  • ${label}: tx=${txHash} finality=${status} execution=${execution}`
-  );
+  return { receipt, txHash: tx.transaction_hash };
 }
 
 void main().catch((err) => {
-  console.error('[ua2] E2E sepolia failed:', err);
+  console.error('\n[ua2] e2e sepolia failed:', err);
   process.exitCode = 1;
 });

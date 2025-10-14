@@ -1,7 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { connect } from '../src/connect';
 import { limits, guard, useSession, makeSessionsManager } from '../src/sessions';
-import type { ConnectOptions, SessionPolicyInput, AccountCall } from '../src/types';
+import type {
+  ConnectOptions,
+  SessionPolicyInput,
+  AccountCall,
+  SessionLimits,
+} from '../src/types';
 import { PolicyViolationError, SessionExpiredError } from '../src/errors';
 import { toUint256 } from '../src/utils/u256';
 
@@ -17,7 +22,8 @@ describe('Sessions API', () => {
     const client = await connect(baseOpts);
 
     const pol: SessionPolicyInput = {
-      expiresAt: 1_700_000_000, // seconds
+      validAfter: 0,
+      validUntil: 1_700_000_000, // seconds
       limits: limits(10, '10000000000000000'), // 0.01 ETH-ish
       allow: {
         targets: ['0xDEAD', '0xBEEF'],
@@ -56,7 +62,8 @@ describe('Sessions API', () => {
     });
 
     const policy: SessionPolicyInput = {
-      expiresAt: 1_888_888_888,
+      validAfter: 0,
+      validUntil: 1_888_888_888,
       limits: limits(3, '0x10'),
       allow: {
         targets: ['0xDEAD', '0xBEEF'],
@@ -73,14 +80,14 @@ describe('Sessions API', () => {
     expect(call.entry).toBe('add_session_with_allowlists');
 
     const data = call.data;
-    expect(data[0]).toBe(data[1]);
+    expect(data[0]).toBe(data[1]); // session id mirrors pubkey
     expect(data.slice(2, 8)).toEqual([
       '0x1',
+      '0x0',
       '0x70962838',
       '0x3',
       '0x0',
       '0x10',
-      '0x0',
     ]);
     expect(data[8]).toBe('0x2');
     expect(data.slice(9, 11)).toEqual(['0xdead', '0xbeef']);
@@ -88,11 +95,59 @@ describe('Sessions API', () => {
     expect(data[12]).toBe('0xcafe');
   });
 
+  it('normalizes policy input and serializes calldata as felts', async () => {
+    const sent: { addr: string; entry: string; data: string[] }[] = [];
+    const transport = {
+      async invoke(addr: string, entry: string, data: string[]) {
+        sent.push({ addr, entry, data: [...data] });
+        return { txHash: '0x888' as const };
+      },
+    };
+
+    const manager = makeSessionsManager({
+      account: { address: '0xACC', chainId: '0xSEPOLIA', label: 'test' },
+      transport,
+      ua2Address: '0xacc0',
+    });
+
+    const rawPolicy: SessionPolicyInput = {
+      validAfter: -5.9,
+      validUntil: -10,
+      limits: { maxCalls: -3, maxValuePerCall: ['0x2', '0x0'] as SessionLimits['maxValuePerCall'] },
+      allow: { targets: ['0xABCD'], selectors: [] },
+      active: false,
+      callsUsed: -4,
+    };
+
+    const session = await manager.create(rawPolicy);
+    expect(session.policy.validAfter).toBe(0);
+    expect(session.policy.validUntil).toBe(1); // clamped to > validAfter
+    expect(session.policy.limits.maxCalls).toBe(0);
+    expect(session.policy.callsUsed).toBe(0);
+    expect(session.policy.allow.targets).toEqual(['0xABCD']);
+    expect(session.policy.allow.selectors).toEqual([]);
+
+    const [sessionId, pubkey, ...rest] = sent[0].data;
+    expect(sessionId).toBe(pubkey);
+    expect(rest).toEqual([
+      '0x0', // inactive
+      '0x0', // valid_after
+      '0x1', // valid_until normalized
+      '0x0', // max_calls clamped
+      '0x0', // calls_used reset
+      '0x2', // max_value_per_call_low normalized
+      '0x1', // allow.targets length
+      '0xabcd',
+      '0x0', // selectors length
+    ]);
+  });
+
   it('revokes a session locally (active=false)', async () => {
     const client = await connect(baseOpts);
 
     const s = await client.sessions.create({
-      expiresAt: 1_800_000_000,
+      validAfter: 0,
+      validUntil: 1_800_000_000,
       limits: limits(1, 0),
       allow: { targets: [], selectors: [] },
       active: true
@@ -120,10 +175,13 @@ describe('Sessions API', () => {
     }).build();
 
     const session = await client.sessions.create(policy);
-    const usage = await useSession(client.sessions, session.id);
+    const usage = await client.sessions.use(session.id);
     expect(usage.session.id).toBe(session.id);
 
     expect(() => usage.ensureAllowed(allowedCall)).not.toThrow();
+    usage.session.policy.callsUsed = usage.session.policy.limits.maxCalls;
+    expect(() => usage.ensureAllowed(allowedCall)).toThrowError(PolicyViolationError);
+    usage.session.policy.callsUsed = 0;
     expect(() =>
       usage.ensureAllowed({ ...allowedCall, to: '0xBEEF' })
     ).toThrowError(PolicyViolationError);
@@ -132,13 +190,42 @@ describe('Sessions API', () => {
     await expect(useSession(client.sessions, session.id)).rejects.toBeInstanceOf(SessionExpiredError);
 
     const expired = await client.sessions.create({
-      expiresAt: Math.floor(Date.now() / 1000) - 1,
+      validAfter: 0,
+      validUntil: Math.floor(Date.now() / 1000) - 1,
       limits: limits(1, 0),
       allow: { targets: [], selectors: [] },
       active: true,
     });
 
     await expect(useSession(client.sessions, expired.id)).rejects.toBeInstanceOf(SessionExpiredError);
+  });
+
+  it('respects provided clock when validating session lifecycle', async () => {
+    const client = await connect(baseOpts);
+    const nowSeconds = Math.floor(Date.now() / 1000);
+
+    const session = await client.sessions.create({
+      validAfter: nowSeconds + 5,
+      validUntil: nowSeconds + 10,
+      limits: limits(2, 0),
+      allow: { targets: [], selectors: [] },
+      active: true,
+    });
+
+    await expect(
+      client.sessions.use(session.id, { now: (session.policy.validAfter - 1) * 1000 })
+    ).rejects.toBeInstanceOf(SessionExpiredError);
+
+    const usage = await client.sessions.use(session.id, { now: session.policy.validAfter * 1000 });
+    expect(usage.session.id).toBe(session.id);
+
+    await expect(
+      client.sessions.use(session.id, { now: (session.policy.validUntil + 1) * 1000 })
+    ).rejects.toBeInstanceOf(SessionExpiredError);
+
+    await expect(client.sessions.use('0xdeadbeef', { now: Date.now() })).rejects.toBeInstanceOf(
+      SessionExpiredError
+    );
   });
 
   it('guard builder shapes policies with defaults', () => {
@@ -151,6 +238,6 @@ describe('Sessions API', () => {
     expect(policy.allow.selectors).toContain('0x2');
     expect(policy.limits.maxCalls).toBeGreaterThanOrEqual(1);
     expect(policy.limits.maxValuePerCall[0]).toBeDefined();
-    expect(policy.expiresAt).toBeGreaterThan(Math.floor(Date.now() / 1000));
+    expect(policy.validUntil).toBeGreaterThan(Math.floor(Date.now() / 1000));
   });
 });

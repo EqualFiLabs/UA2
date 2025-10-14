@@ -25,13 +25,12 @@ use snforge_std::signature::stark_curve::{
 use starknet::account::Call;
 use starknet::syscalls::call_contract_syscall;
 use starknet::{ContractAddress, SyscallResultTrait};
+use ua2_contracts::errors::{ERR_GUARDIAN_CALL_DENIED, ERR_NO_RECOVERY};
 use ua2_contracts::ua2_account::UA2Account::{self, RecoveryDelaySet};
 
 const MODE_OWNER: felt252 = 0;
 const MODE_GUARDIAN: felt252 = 2;
 const OWNER_PRIVATE_KEY: felt252 = 0x123456789abcdef0123456789abcdef0123456789abcdef0123456789abcde;
-const ERR_NO_RECOVERY: felt252 = 'ERR_NO_RECOVERY';
-const ERR_GUARDIAN_CALL_DENIED: felt252 = 'ERR_GUARDIAN_CALL_DENIED';
 
 fn owner_keypair() -> KeyPair<felt252, felt252> {
     StarkCurveKeyPairImpl::from_secret_key(OWNER_PRIVATE_KEY)

@@ -7,12 +7,26 @@ pub mod MockERC20 {
 
     #[storage]
     pub struct Storage {
+        last_from: ContractAddress,
         last_to: ContractAddress,
         last_amount: u256,
     }
 
     #[external(v0)]
     fn transfer(ref self: ContractState, to: ContractAddress, amount: u256) -> bool {
+        self.last_to.write(to);
+        self.last_amount.write(amount);
+        true
+    }
+
+    #[external(v0)]
+    fn transferFrom(
+        ref self: ContractState,
+        from: ContractAddress,
+        to: ContractAddress,
+        amount: u256,
+    ) -> bool {
+        self.last_from.write(from);
         self.last_to.write(to);
         self.last_amount.write(amount);
         true

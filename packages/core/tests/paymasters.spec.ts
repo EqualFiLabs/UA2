@@ -84,6 +84,25 @@ describe('paymasters', () => {
     expect(last.data.slice(-3)).toEqual(['0x2', '0xcafe', '0xbeef']);
   });
 
+  it('marks execution as unsponsored when paymaster adds no metadata', async () => {
+    const { transport, sent } = mkFakeTransport();
+
+    const silent: Paymaster = {
+      name: 'empty',
+      async sponsor(tx: AccountTransaction): Promise<SponsoredTx> {
+        return { ...tx };
+      },
+    };
+
+    const runner = withPaymaster({ account, ua2Address, transport, paymaster: silent });
+    const res = await runner.execute({ to: '0x1', selector: '0x2', calldata: [] });
+
+    expect(res.sponsored).toBe(false);
+    expect(res.sponsorName).toBe('empty');
+    expect(sent.length).toBe(1);
+    expect(sent[0].data.slice(-1)[0]).toBe('0x0');
+  });
+
   it('propagates sponsor rejections with documented error', async () => {
     const { transport, sent } = mkFakeTransport();
     const expected = new PaymasterDeniedError('sponsor offline');

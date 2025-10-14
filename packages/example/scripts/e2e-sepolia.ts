@@ -73,7 +73,11 @@ async function main(): Promise<void> {
     );
   }
 
-  const ownerAccount = new Account(toolkit.provider, ua2Address, toolkit.ownerKey);
+  const ownerAccount = new Account({
+    provider: toolkit.provider,
+    address: ua2Address,
+    signer: toolkit.ownerKey,
+  });
   const ownerTransport = new AccountCallTransport(ownerAccount);
 
   const sessions = makeSessionsManager({

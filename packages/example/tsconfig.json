@@ -1,11 +1,13 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
+    "baseUrl": ".",
     "jsx": "react-jsx",
     "types": ["vite/client", "node"],
     "paths": {
       "@ua2/core": ["../core/src/index.ts"],
-      "@ua2/react": ["../react/src/index.ts"]
+      "@ua2/react": ["../react/src/index.ts"],
+      "@ua2/paymasters": ["../paymasters/src/index.ts"]
     }
   },
   "include": [

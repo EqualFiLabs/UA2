@@ -49,7 +49,7 @@ function createClient(invokeMock: InvokeMock): {
   const runner = {
     execute: executePaymasterMock,
     call: vi.fn(),
-    paymaster: new NoopPaymaster('demo'),
+    paymaster: new NoopPaymaster({ name: 'demo' }),
   };
   const withPaymasterMock = vi.fn(() => runner);
 

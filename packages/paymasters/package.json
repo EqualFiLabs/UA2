@@ -21,7 +21,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "starknet": "^7.6.4",
+    "starknet": "^8.5.5",
     "tslib": "^2.6.2"
   },
   "devDependencies": {

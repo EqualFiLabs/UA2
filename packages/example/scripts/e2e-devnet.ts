@@ -2,7 +2,7 @@ import fsPromises from 'node:fs/promises';
 import path from 'node:path';
 
 import { limits, makeSessionsManager, type SessionPolicyInput } from '@ua2/core';
-import { Account } from 'starknet';
+import { Account, EDataAvailabilityMode } from 'starknet';
 
 import {
   AccountCallTransport,
@@ -10,6 +10,7 @@ import {
   assertSucceeded,
   deriveSessionKeyHash,
   ensureUa2Deployed,
+  defaultResourceBounds,
   initialSessionUsageState,
   logReceipt,
   optionalEnv,
@@ -73,7 +74,11 @@ async function main(): Promise<void> {
     );
   }
 
-  const ownerAccount = new Account(toolkit.provider, ua2Address, toolkit.ownerKey);
+  const ownerAccount = new Account({
+    provider: toolkit.provider,
+    address: ua2Address,
+    signer: toolkit.ownerKey,
+  });
   const ownerTransport = new AccountCallTransport(ownerAccount);
 
   const sessions = makeSessionsManager({
@@ -147,11 +152,20 @@ async function main(): Promise<void> {
   );
 
   console.log('[4] revoke session');
-  const revokeTx = await ownerAccount.execute({
-    contractAddress: ua2Address,
-    entrypoint: 'revoke_session',
-    calldata: [sessionKeyHash],
-  });
+  const revokeTx = await ownerAccount.execute(
+    {
+      contractAddress: ua2Address,
+      entrypoint: 'revoke_session',
+      calldata: [sessionKeyHash],
+    },
+    {
+      version: '0x3',
+      resourceBounds: defaultResourceBounds(),
+      tip: 8n,
+      nonceDataAvailabilityMode: EDataAvailabilityMode.L2,
+      feeDataAvailabilityMode: EDataAvailabilityMode.L2,
+    }
+  );
   const revokeReceipt = await waitForReceipt(
     toolkit.provider,
     revokeTx.transaction_hash,
@@ -185,6 +199,11 @@ async function pickDeployment(
     return ensureUa2Deployed(toolkit, envAddress);
   }
 
+  const forcedClassHash = optionalEnv([
+    `UA2_${toolkit.network.toUpperCase()}_CLASS_HASH`,
+    'UA2_CLASS_HASH',
+  ]);
+
   if (cachedAddress) {
     const attached = await ensureUa2Deployed(toolkit, cachedAddress);
     if (attached.classHash !== '0x0') {
@@ -194,6 +213,11 @@ async function pickDeployment(
   }
 
   console.log('[ua2] deploying UA² account to devnet…');
+  if (forcedClassHash) {
+    console.log(`[ua2] deployment using forced class hash ${normalizeHex(forcedClassHash)}`);
+  } else {
+    console.log('[ua2] deployment will declare UA² class (no forced class hash set)');
+  }
   return ensureUa2Deployed(toolkit);
 }
 
@@ -252,16 +276,25 @@ async function sendApplySessionUsage(
   calls: number,
   label: string
 ) {
-  const tx = await owner.execute({
-    contractAddress: ua2Address,
-    entrypoint: 'apply_session_usage',
-    calldata: [
-      sessionKeyHash,
-      toFelt(state.callsUsed),
-      toFelt(calls),
-      toFelt(state.nonce),
-    ],
-  });
+  const tx = await owner.execute(
+    {
+      contractAddress: ua2Address,
+      entrypoint: 'apply_session_usage',
+      calldata: [
+        sessionKeyHash,
+        toFelt(state.callsUsed),
+        toFelt(calls),
+        toFelt(state.nonce),
+      ],
+    },
+    {
+      version: '0x3',
+      resourceBounds: defaultResourceBounds(),
+      tip: 8n,
+      nonceDataAvailabilityMode: EDataAvailabilityMode.L2,
+      feeDataAvailabilityMode: EDataAvailabilityMode.L2,
+    }
+  );
   const receipt = await waitForReceipt(
     toolkit.provider,
     tx.transaction_hash,

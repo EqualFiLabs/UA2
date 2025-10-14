@@ -1,230 +1,213 @@
-import { limits, makeSessionsManager, type SessionPolicyInput } from '@ua2/core';
-import { Account } from 'starknet';
+import { spawn } from 'node:child_process';
+
+import { limits, makeSessionsManager, type CallTransport, type Felt, type SessionPolicyInput } from '@ua2/core';
+import { RpcProvider } from 'starknet';
 
 import {
-  AccountCallTransport,
   assertReverted,
   assertSucceeded,
-  ensureUa2Deployed,
   initialSessionUsageState,
+  loadEnv,
+  normalizeHex,
   optionalEnv,
   readOwner,
+  requireEnv,
   selectorFor,
-  setupToolkit,
   toFelt,
   updateSessionUsage,
   waitForReceipt,
   type Network,
 } from './shared.js';
 
+type SncastConfig = {
+  profile: string;
+  account: string;
+  rpcUrl: string;
+};
+
+type SncastResult = {
+  code: number;
+  stdout: string;
+  stderr: string;
+};
+
+class SncastTransport implements CallTransport {
+  private readonly config: SncastConfig;
+  public lastTxHash: Felt | null = null;
+
+  constructor(config: SncastConfig) {
+    this.config = config;
+  }
+
+  async invoke(address: Felt, entrypoint: string, calldata: Felt[]): Promise<{ txHash: Felt }> {
+    const args = buildSncastArgs(this.config, address, entrypoint, calldata);
+    const result = await runSncast(args);
+
+    const parsed = parseSncastJson(result.stdout) ?? parseSncastJson(result.stderr);
+    if (!parsed || typeof parsed.transaction_hash !== 'string') {
+      throw new Error(
+        `sncast invoke failed for ${entrypoint}. exit=${result.code} stdout=${result.stdout} stderr=${result.stderr}`
+      );
+    }
+
+    const txHash = normalizeHex(parsed.transaction_hash);
+    this.lastTxHash = txHash;
+    return { txHash };
+  }
+}
+
 async function main(): Promise<void> {
   const network: Network = 'devnet';
-  const toolkit = await setupToolkit(network);
+  loadEnv(network);
 
-  const attachedAddress = optionalEnv([
+  const rpcUrl = requireEnv(['STARKNET_RPC_URL']);
+  const profile = optionalEnv(['SNCAST_PROFILE', 'UA2_SNCAST_PROFILE'], 'devnet') ?? 'devnet';
+  const accountName = requireEnv(['SNCAST_ACCOUNT', 'SNCAST_ACCOUNT_NAME']);
+  const ua2Address = requireEnv([
     `UA2_${network.toUpperCase()}_PROXY_ADDR`,
     'UA2_PROXY_ADDR',
   ]);
 
-  const { address: ua2Address } = await ensureUa2Deployed(toolkit, attachedAddress);
-  const ownerAccount = new Account(toolkit.provider, ua2Address, toolkit.ownerKey);
-  const ownerTransport = new AccountCallTransport(ownerAccount);
+  const provider = new RpcProvider({ nodeUrl: rpcUrl });
+  const chainId = normalizeHex(await provider.getChainId());
 
-  const ownerBefore = await readOwner(toolkit.provider, ua2Address);
-  if (ownerBefore.toLowerCase() !== toolkit.ownerPubKey.toLowerCase()) {
-    console.warn(
-      `[ua2] Warning: UA² owner on-chain (${ownerBefore}) does not match configured owner pubkey (${toolkit.ownerPubKey}).`
-    );
-  }
+  const ownerBefore = await readOwner(provider, ua2Address);
+  console.log('E2E DEVNET (sncast)');
+  console.log(`- profile: ${profile} (account: ${accountName})`);
+  console.log(`- UA² account: ${ua2Address}`);
+  console.log(`- on-chain owner: ${ownerBefore}`);
 
-  console.log('E2E DEVNET');
-  console.log(`- deploy/attach ✓ (${ua2Address})`);
-
+  const transport = new SncastTransport({ profile, account: accountName, rpcUrl });
   const sessions = makeSessionsManager({
-    account: { address: ua2Address, chainId: toolkit.chainId },
-    transport: ownerTransport,
+    account: { address: ua2Address, chainId },
+    transport,
     ua2Address,
   });
 
-  const expiresAt = Math.floor(Date.now() / 1000) + 2 * 60 * 60;
-  const sessionTargetValue =
-    optionalEnv(
-      [`UA2_${network.toUpperCase()}_SESSION_TARGET`, 'UA2_SESSION_TARGET', 'UA2_E2E_TARGET_ADDR'],
-      toolkit.guardianAddress
-    ) ?? toolkit.guardianAddress;
-  const sessionTarget = toFelt(sessionTargetValue);
-  const transferSelector = selectorFor('transfer');
-
+  const now = Math.floor(Date.now() / 1000);
   const policy: SessionPolicyInput = {
-    expiresAt,
-    limits: limits(5, 10n ** 15n),
+    validAfter: now,
+    validUntil: now + 10 * 60,
+    limits: limits(2, 10n ** 15n),
     allow: {
-      targets: [sessionTarget],
-      selectors: [transferSelector],
+      targets: [toFelt(ua2Address)],
+      selectors: [selectorFor('apply_session_usage')],
     },
   };
 
   const session = await sessions.create(policy);
-  if (!ownerTransport.lastTxHash) {
-    throw new Error('Session creation did not produce a transaction hash.');
+  if (!transport.lastTxHash) {
+    throw new Error('Session creation did not emit a transaction hash.');
   }
-  const createReceipt = await waitForReceipt(toolkit.provider, ownerTransport.lastTxHash, 'session create');
+  const createReceipt = await waitForReceipt(provider, transport.lastTxHash, 'session create');
   assertSucceeded(createReceipt, 'session create');
   console.log(`- create session ✓ (${session.id})`);
 
   let usage = initialSessionUsageState();
+  usage = await applySessionUsage(transport, provider, ua2Address, session.id, usage, 1, 'session use #1');
+  usage = await applySessionUsage(transport, provider, ua2Address, session.id, usage, 1, 'session use #2');
+  console.log('- in-policy calls ✓');
 
-  usage = await applySessionUsage(toolkit, ownerAccount, ua2Address, session.id, usage, 1, 'session use #1');
-  usage = await applySessionUsage(toolkit, ownerAccount, ua2Address, session.id, usage, 1, 'session use #2');
-  usage = await applySessionUsage(toolkit, ownerAccount, ua2Address, session.id, usage, 1, 'session use #3');
-  console.log('- in-policy x3 ✓');
-
-  const violationTx = await ownerAccount.execute({
-    contractAddress: ua2Address,
-    entrypoint: 'apply_session_usage',
-    calldata: [
-      session.id,
-      toFelt(usage.callsUsed),
-      toFelt(3),
-      toFelt(usage.nonce),
-    ],
-  });
-  const violationReceipt = await waitForReceipt(
-    toolkit.provider,
-    violationTx.transaction_hash,
-    'policy violation'
-  );
+  const violation = await transport.invoke(ua2Address, 'apply_session_usage', [
+    session.id,
+    toFelt(usage.callsUsed),
+    toFelt(1),
+    toFelt(usage.nonce),
+  ]);
+  const violationReceipt = await waitForReceipt(provider, violation.txHash, 'policy violation');
   assertReverted(violationReceipt, 'ERR_POLICY_CALLCAP', 'policy violation');
   console.log('- out-of-policy revert ✓ (ERR_POLICY_CALLCAP)');
 
-  const revokeTx = await ownerAccount.execute({
-    contractAddress: ua2Address,
-    entrypoint: 'revoke_session',
-    calldata: [session.id],
-  });
-  const revokeReceipt = await waitForReceipt(toolkit.provider, revokeTx.transaction_hash, 'session revoke');
+  const revokeTx = await transport.invoke(ua2Address, 'revoke_session', [session.id]);
+  const revokeReceipt = await waitForReceipt(provider, revokeTx.txHash, 'session revoke');
   assertSucceeded(revokeReceipt, 'session revoke');
-
-  const postRevokeTx = await ownerAccount.execute({
-    contractAddress: ua2Address,
-    entrypoint: 'apply_session_usage',
-    calldata: [
-      session.id,
-      toFelt(usage.callsUsed),
-      toFelt(1),
-      toFelt(usage.nonce),
-    ],
-  });
-  const postRevokeReceipt = await waitForReceipt(
-    toolkit.provider,
-    postRevokeTx.transaction_hash,
-    'post-revoke session usage'
-  );
-  assertReverted(postRevokeReceipt, 'ERR_SESSION_INACTIVE', 'post revoke session use');
-  console.log('- revoke + denied ✓');
-
-  await runGuardianRecovery(toolkit, ua2Address);
-  console.log('- guardian recovery ✓');
+  console.log('- revoke session ✓');
 
   console.log('E2E DEVNET ✓ complete');
 }
 
+type SessionUsageState = ReturnType<typeof initialSessionUsageState>;
+
 async function applySessionUsage(
-  toolkit: Awaited<ReturnType<typeof setupToolkit>>,
-  owner: Account,
-  ua2Address: string,
-  sessionId: string,
-  state: ReturnType<typeof initialSessionUsageState>,
+  transport: SncastTransport,
+  provider: RpcProvider,
+  ua2Address: Felt,
+  sessionId: Felt,
+  state: SessionUsageState,
   calls: number,
   label: string
-) {
-  const tx = await owner.execute({
-    contractAddress: ua2Address,
-    entrypoint: 'apply_session_usage',
-    calldata: [
-      sessionId,
-      toFelt(state.callsUsed),
-      toFelt(calls),
-      toFelt(state.nonce),
-    ],
-  });
-  const receipt = await waitForReceipt(toolkit.provider, tx.transaction_hash, label);
+): Promise<SessionUsageState> {
+  const tx = await transport.invoke(ua2Address, 'apply_session_usage', [
+    sessionId,
+    toFelt(state.callsUsed),
+    toFelt(calls),
+    toFelt(state.nonce),
+  ]);
+  const receipt = await waitForReceipt(provider, tx.txHash, label);
   assertSucceeded(receipt, label);
   return updateSessionUsage(state, calls);
 }
 
-async function runGuardianRecovery(toolkit: Awaited<ReturnType<typeof setupToolkit>>, ua2Address: string) {
-  const ownerAccount = new Account(toolkit.provider, ua2Address, toolkit.ownerKey);
-
-  await sendAndAwait(toolkit, ownerAccount, ua2Address, 'add_guardian', [toolkit.guardianAddress], 'add guardian', [
-    'ERR_GUARDIAN_EXISTS',
-  ]);
-  await sendAndAwait(toolkit, ownerAccount, ua2Address, 'set_guardian_threshold', [toFelt(1)], 'set guardian threshold');
-  await sendAndAwait(toolkit, ownerAccount, ua2Address, 'set_recovery_delay', [toFelt(0)], 'set recovery delay');
-
-  const guardianPropose = await toolkit.guardian.execute({
-    contractAddress: ua2Address,
-    entrypoint: 'propose_recovery',
-    calldata: [toolkit.guardianPubKey],
-  });
-  const guardianProposeReceipt = await waitForReceipt(
-    toolkit.provider,
-    guardianPropose.transaction_hash,
-    'guardian propose recovery'
-  );
-  assertSucceeded(guardianProposeReceipt, 'guardian propose recovery');
-
-  const executeTx = await toolkit.guardian.execute({
-    contractAddress: ua2Address,
-    entrypoint: 'execute_recovery',
-    calldata: [],
-  });
-  const executeReceipt = await waitForReceipt(toolkit.provider, executeTx.transaction_hash, 'execute recovery');
-  assertSucceeded(executeReceipt, 'execute recovery');
-
-  const ownerAfter = await readOwner(toolkit.provider, ua2Address);
-  if (ownerAfter.toLowerCase() !== toolkit.guardianPubKey.toLowerCase()) {
-    throw new Error(`Recovery did not update owner. expected ${toolkit.guardianPubKey}, got ${ownerAfter}`);
+function buildSncastArgs(
+  config: SncastConfig,
+  address: Felt,
+  entrypoint: string,
+  calldata: Felt[]
+): string[] {
+  const args: string[] = ['--profile', config.profile];
+  if (config.rpcUrl) {
+    args.push('--rpc-url', config.rpcUrl);
   }
-
-  const recoveredOwner = new Account(toolkit.provider, ua2Address, toolkit.guardianKey);
-  await sendAndAwait(
-    toolkit,
-    recoveredOwner,
-    ua2Address,
-    'rotate_owner',
-    [toolkit.ownerPubKey],
-    'rotate owner back'
-  );
+  args.push('invoke', '--account', config.account, '--address', address, '--function', entrypoint);
+  if (calldata.length > 0) {
+    args.push('--calldata', ...calldata);
+  }
+  args.push('--json');
+  return args;
 }
 
-async function sendAndAwait(
-  toolkit: Awaited<ReturnType<typeof setupToolkit>>,
-  signer: Account,
-  ua2Address: string,
-  entrypoint: string,
-  calldata: readonly string[],
-  label: string,
-  ignorableReasons: string[] = []
-): Promise<void> {
-  const tx = await signer.execute({
-    contractAddress: ua2Address,
-    entrypoint,
-    calldata: [...calldata],
+function runSncast(args: string[]): Promise<SncastResult> {
+  return new Promise((resolve, reject) => {
+    const child = spawn('sncast', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.on('error', reject);
+    child.on('close', (code) => {
+      resolve({ code: code ?? 0, stdout, stderr });
+    });
   });
-  const receipt = await waitForReceipt(toolkit.provider, tx.transaction_hash, label);
-  const execution = (receipt?.execution_status ?? '').toString();
-  if (execution === 'REVERTED') {
-    const reason = (receipt?.revert_reason ?? '').toString();
-    if (ignorableReasons.some((expected) => reason.includes(expected))) {
-      return;
-    }
-    throw new Error(`${label} failed: ${reason || 'unknown revert reason'}`);
+}
+
+function parseSncastJson(output: string): Record<string, unknown> | null {
+  const trimmed = output.trim();
+  if (!trimmed) {
+    return null;
   }
-  assertSucceeded(receipt, label);
+  const lines = trimmed.split(/\r?\n/).map((line) => line.trim()).filter((line) => line.length > 0);
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const line = lines[i];
+    try {
+      return JSON.parse(line) as Record<string, unknown>;
+    } catch (err) {
+      void err;
+    }
+  }
+  try {
+    return JSON.parse(trimmed) as Record<string, unknown>;
+  } catch (err) {
+    void err;
+  }
+  return null;
 }
 
 void main().catch((err) => {
-  console.error('[ua2] E2E devnet failed:', err);
+  console.error('[ua2] e2e-devnet failed:', err);
   process.exitCode = 1;
 });

@@ -48,7 +48,8 @@ async function main(): Promise<void> {
     ua2Address: normalizedAddress,
   });
 
-  const expiresAt = Math.floor(Date.now() / 1000) + 2 * 60 * 60;
+  const validAfter = Math.floor(Date.now() / 1000);
+  const validUntil = validAfter + 2 * 60 * 60;
   const sessionTargetValue =
     optionalEnv(
       [`UA2_${network.toUpperCase()}_SESSION_TARGET`, 'UA2_SESSION_TARGET', 'UA2_E2E_TARGET_ADDR'],
@@ -58,7 +59,8 @@ async function main(): Promise<void> {
   const transferSelector = selectorFor('transfer');
 
   const policy: SessionPolicyInput = {
-    expiresAt,
+    validAfter,
+    validUntil,
     limits: limits(5, 10n ** 15n),
     allow: {
       targets: [sessionTarget],

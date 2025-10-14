@@ -28,8 +28,8 @@ pub mod UA2Account {
         ERR_POLICY_SELECTOR_DENIED, ERR_POLICY_TARGET_DENIED, ERR_RECOVERY_IN_PROGRESS,
         ERR_RECOVERY_MISMATCH, ERR_SAME_OWNER, ERR_SESSION_EXPIRED, ERR_SESSION_INACTIVE,
         ERR_SESSION_NOT_READY, ERR_SESSION_SELECTORS_LEN, ERR_SESSION_SIG_INVALID,
-        ERR_SESSION_STALE, ERR_SESSION_TARGETS_LEN, ERR_SIGNATURE_MISSING, ERR_VALUE_LIMIT_EXCEEDED,
-        ERR_ZERO_OWNER,
+        ERR_SESSION_STALE, ERR_SESSION_TARGETS_LEN, ERR_SIGNATURE_MISSING,
+        ERR_UNSUPPORTED_AUTH_MODE, ERR_VALUE_LIMIT_EXCEEDED, ERR_ZERO_OWNER,
     };
     use crate::session::Session;
     use super::{AccountComponent, SRC5Component};
@@ -44,6 +44,7 @@ pub mod UA2Account {
     const PROPOSE_RECOVERY_SELECTOR: felt252 = starknet::selector!("propose_recovery");
     const CONFIRM_RECOVERY_SELECTOR: felt252 = starknet::selector!("confirm_recovery");
     const EXECUTE_RECOVERY_SELECTOR: felt252 = starknet::selector!("execute_recovery");
+    const CANCEL_RECOVERY_SELECTOR: felt252 = starknet::selector!("cancel_recovery");
 
     #[storage]
     pub struct Storage {
@@ -683,6 +684,40 @@ pub mod UA2Account {
         low + high * high_limit
     }
 
+    fn bool_to_u32(value: bool) -> u32 {
+        if value {
+            1_u32
+        } else {
+            0_u32
+        }
+    }
+
+    fn calls_are_recovery_only(calls: @Array<Call>) -> bool {
+        let calls_len = ArrayTrait::<Call>::len(calls);
+        if calls_len == 0_usize {
+            return false;
+        }
+
+        let contract_address = get_contract_address();
+
+        for call_ref in calls.span() {
+            let Call { to, selector, calldata: _ } = *call_ref;
+
+            if to != contract_address {
+                return false;
+            }
+
+            let allowed = selector == CONFIRM_RECOVERY_SELECTOR
+                || selector == EXECUTE_RECOVERY_SELECTOR
+                || selector == CANCEL_RECOVERY_SELECTOR;
+            if allowed == false {
+                return false;
+            }
+        }
+
+        true
+    }
+
     fn extract_owner_signature(signature: Span<felt252>) -> Array<felt252> {
         let signature_len = signature.len();
         require(signature_len > 0_usize, ERR_SIGNATURE_MISSING);
@@ -741,7 +776,8 @@ pub mod UA2Account {
 
             let allowed = selector == PROPOSE_RECOVERY_SELECTOR
                 || selector == CONFIRM_RECOVERY_SELECTOR
-                || selector == EXECUTE_RECOVERY_SELECTOR;
+                || selector == EXECUTE_RECOVERY_SELECTOR
+                || selector == CANCEL_RECOVERY_SELECTOR;
             require(allowed, ERR_GUARDIAN_CALL_DENIED);
         }
     }
@@ -916,14 +952,29 @@ pub mod UA2Account {
             let signature_len = signature.len();
             require(signature_len > 0_usize, ERR_SIGNATURE_MISSING);
 
-            let mode = *signature.at(0_usize);
+            let recovery_active = self.recovery_active.read();
+            if recovery_active {
+                let allowed = calls_are_recovery_only(@calls);
+                assert(allowed, ERR_RECOVERY_IN_PROGRESS);
+                return starknet::VALIDATED;
+            }
 
-            if mode == MODE_SESSION {
+            let mode_hint = *signature.at(0_usize);
+            let using_session = mode_hint == MODE_SESSION;
+            let using_guardian = mode_hint == MODE_GUARDIAN;
+            let using_owner = mode_hint == MODE_OWNER || (!using_session && !using_guardian);
+
+            let mut modes = bool_to_u32(using_owner);
+            modes += bool_to_u32(using_session);
+            modes += bool_to_u32(using_guardian);
+            require(modes == 1_u32, ERR_UNSUPPORTED_AUTH_MODE);
+
+            if using_session {
                 let _validation = validate_session_policy(self, signature, @calls);
                 return starknet::VALIDATED;
             }
 
-            if mode == MODE_GUARDIAN {
+            if using_guardian {
                 validate_guardian_authorization(self, signature, @calls);
                 return starknet::VALIDATED;
             }

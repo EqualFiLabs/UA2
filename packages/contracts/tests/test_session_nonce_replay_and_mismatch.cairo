@@ -150,23 +150,23 @@ fn test_session_nonce_replay_and_mismatch() {
     let calls = array![call];
 
     let signature0: Array<felt252> =
-        build_session_signature(account_address, session_pubkey, 0_u128, @calls);
+        build_session_signature(account_address, session_pubkey, 0_u128, policy.valid_until, @calls);
     execute_with_signature(account_address, @calls, @signature0).unwrap_syscall();
 
     let replay_result = execute_with_signature(account_address, @calls, @signature0);
     assert_reverted_with(replay_result, ERR_BAD_SESSION_NONCE);
 
     let skip_signature: Array<felt252> =
-        build_session_signature(account_address, session_pubkey, 2_u128, @calls);
+        build_session_signature(account_address, session_pubkey, 2_u128, policy.valid_until, @calls);
     let skip_result = execute_with_signature(account_address, @calls, @skip_signature);
     assert_reverted_with(skip_result, ERR_BAD_SESSION_NONCE);
 
     let signature1: Array<felt252> =
-        build_session_signature(account_address, session_pubkey, 1_u128, @calls);
+        build_session_signature(account_address, session_pubkey, 1_u128, policy.valid_until, @calls);
     execute_with_signature(account_address, @calls, @signature1).unwrap_syscall();
 
     let signature2: Array<felt252> =
-        build_session_signature(account_address, session_pubkey, 2_u128, @calls);
+        build_session_signature(account_address, session_pubkey, 2_u128, policy.valid_until, @calls);
 
     let tampered_amount = u256 { low: 1_001_u128, high: 0_u128 };
     let tampered_call = build_transfer_call(mock_address, to, tampered_amount);

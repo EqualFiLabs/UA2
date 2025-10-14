@@ -112,7 +112,13 @@ fn session_allows_whitelisted_calls() {
     let zero_contract: ContractAddress = 0.try_into().unwrap();
     start_cheat_caller_address(account_address, zero_contract);
     let signature: Array<felt252> =
-        build_session_signature(account_address, session_pubkey, 0_u128, @calls);
+        build_session_signature(
+            account_address,
+            session_pubkey,
+            0_u128,
+            policy.valid_until,
+            @calls,
+        );
     start_cheat_signature(account_address, signature.span());
     let mut execute_calldata = array![];
     Serde::<Array<Call>>::serialize(@calls, ref execute_calldata);

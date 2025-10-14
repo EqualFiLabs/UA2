@@ -687,17 +687,21 @@ pub mod UA2Account {
     fn compute_session_message_hash(
         chain_id: felt252,
         account_felt: felt252,
+        session_pubkey: felt252,
         key_hash: felt252,
-        nonce: u128,
         call_digest: felt252,
+        valid_until: u64,
+        nonce: u128,
     ) -> felt252 {
         let mut values = array![
             SESSION_DOMAIN_TAG,
             chain_id,
             account_felt,
+            session_pubkey,
             key_hash,
-            nonce.into(),
             call_digest,
+            valid_until.into(),
+            nonce.into(),
         ];
         poseidon_hash_span(values.span())
     }
@@ -811,9 +815,11 @@ pub mod UA2Account {
         let message = compute_session_message_hash(
             chain_id,
             account_felt,
+            session_key,
             key_hash,
-            provided_nonce,
             call_digest,
+            policy.valid_until,
+            provided_nonce,
         );
 
         let sig_r = *signature.at(4_usize);

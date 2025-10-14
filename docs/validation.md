@@ -20,6 +20,7 @@
    - If selector == `ERC20::transfer`, ensure amount ≤ `max_value_per_call` (`ERR_VALUE_LIMIT_EXCEEDED`).
 8. Require provided session nonce == stored nonce (`ERR_BAD_SESSION_NONCE`).
 9. Verify ECDSA signature against the computed session message (`ERR_SESSION_SIG_INVALID`).
+   - Message binds `{chainId, accountAddress, sessionPubkey, callHash, validUntil, nonce}` to prevent cross-channel replay.
 10. Call `apply_session_usage` to atomically bump `calls_used`, advance the nonce, and emit `SessionUsed` + `SessionNonceAdvanced`.
 11. Proceed to `__execute__`.
 

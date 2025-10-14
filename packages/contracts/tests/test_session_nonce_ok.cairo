@@ -147,11 +147,11 @@ fn test_session_nonce_ok() {
     let calls = array![call];
 
     let signature0: Array<felt252> =
-        build_session_signature(account_address, session_pubkey, 0_u128, @calls);
+        build_session_signature(account_address, session_pubkey, 0_u128, policy.valid_until, @calls);
     execute_with_signature(account_address, @calls, @signature0);
 
     let signature1: Array<felt252> =
-        build_session_signature(account_address, session_pubkey, 1_u128, @calls);
+        build_session_signature(account_address, session_pubkey, 1_u128, policy.valid_until, @calls);
     execute_with_signature(account_address, @calls, @signature1);
 
     stop_cheat_block_timestamp(account_address);

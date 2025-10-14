@@ -125,11 +125,12 @@ fn execute_session_calls(
     calls: @Array<Call>,
     nonce: u128,
     session_pubkey: felt252,
+    valid_until: u64,
 ) -> SyscallResult<Span<felt252>> {
     let zero_contract: ContractAddress = 0.try_into().unwrap();
     start_cheat_caller_address(account_address, zero_contract);
     let signature: Array<felt252> =
-        build_session_signature(account_address, session_pubkey, nonce, calls);
+        build_session_signature(account_address, session_pubkey, nonce, valid_until, calls);
     start_cheat_signature(account_address, signature.span());
 
     let mut execute_calldata = array![];
@@ -273,7 +274,7 @@ fn denies_selector_not_allowed() {
     let call = build_transfer_call(mock_address, to, amount);
     let calls = array![call];
 
-    let result = execute_session_calls(account_address, @calls, 0_u128, session_pubkey);
+    let result = execute_session_calls(account_address, @calls, 0_u128, session_pubkey, policy.valid_until);
 
     assert_reverted_with(result, ERR_POLICY_SELECTOR_DENIED);
 
@@ -306,7 +307,7 @@ fn denies_target_not_allowed() {
     let call = build_transfer_call(mock_address, to, amount);
     let calls = array![call];
 
-    let result = execute_session_calls(account_address, @calls, 0_u128, session_pubkey);
+    let result = execute_session_calls(account_address, @calls, 0_u128, session_pubkey, policy.valid_until);
 
     assert_reverted_with(result, ERR_POLICY_TARGET_DENIED);
 
@@ -339,7 +340,7 @@ fn denies_expired_session() {
     let call = build_transfer_call(mock_address, to, amount);
     let calls = array![call];
 
-    let result = execute_session_calls(account_address, @calls, 0_u128, session_pubkey);
+    let result = execute_session_calls(account_address, @calls, 0_u128, session_pubkey, policy.valid_until);
 
     assert_reverted_with(result, ERR_SESSION_EXPIRED);
 
@@ -373,7 +374,7 @@ fn denies_over_call_cap() {
     let call_two = build_transfer_call(mock_address, to, amount);
     let calls = array![call_one, call_two];
 
-    let result = execute_session_calls(account_address, @calls, 0_u128, session_pubkey);
+    let result = execute_session_calls(account_address, @calls, 0_u128, session_pubkey, policy.valid_until);
 
     assert_reverted_with(result, ERR_POLICY_CALLCAP);
 
@@ -406,7 +407,7 @@ fn denies_over_value_cap() {
     let call = build_transfer_call(mock_address, to, amount);
     let calls = array![call];
 
-    let result = execute_session_calls(account_address, @calls, 0_u128, session_pubkey);
+    let result = execute_session_calls(account_address, @calls, 0_u128, session_pubkey, policy.valid_until);
 
     assert_reverted_with(result, ERR_VALUE_LIMIT_EXCEEDED);
 

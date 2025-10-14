@@ -4,62 +4,41 @@ use openzeppelin::introspection::src5::SRC5Component;
 #[starknet::contract(account)]
 #[feature("deprecated_legacy_map")]
 pub mod UA2Account {
-    use super::{AccountComponent, SRC5Component};
-    use crate::errors::{
-        ERR_ALREADY_CONFIRMED,
-        ERR_BAD_SESSION_NONCE,
-        ERR_BAD_THRESHOLD,
-        ERR_BEFORE_ETA,
-        ERR_GUARDIAN_CALL_DENIED,
-        ERR_GUARDIAN_EXISTS,
-        ERR_GUARDIAN_SIG_INVALID,
-        ERR_NO_RECOVERY,
-        ERR_NOT_ENOUGH_CONFIRMS,
-        ERR_NOT_GUARDIAN,
-        ERR_NOT_OWNER,
-        ERR_OWNER_SIG_INVALID,
-        ERR_POLICY_CALLCAP,
-        ERR_POLICY_CALLCOUNT_MISMATCH,
-        ERR_POLICY_SELECTOR_DENIED,
-        ERR_POLICY_TARGET_DENIED,
-        ERR_RECOVERY_IN_PROGRESS,
-        ERR_RECOVERY_MISMATCH,
-        ERR_SAME_OWNER,
-        ERR_SESSION_EXPIRED,
-        ERR_SESSION_INACTIVE,
-        ERR_SESSION_NOT_READY,
-        ERR_SESSION_SELECTORS_LEN,
-        ERR_SESSION_SIG_INVALID,
-        ERR_SESSION_TARGETS_LEN,
-        ERR_SIGNATURE_MISSING,
-        ERR_VALUE_LIMIT_EXCEEDED,
-        ERR_ZERO_OWNER,
-    };
-    use crate::session::Session;
     use core::array::{Array, ArrayTrait, SpanTrait};
-    use core::option::Option;
-    use core::traits::{Into, TryInto};
-    use core::integer::u256;
-    use core::serde::Serde;
     use core::ecdsa::check_ecdsa_signature;
+    use core::integer::u256;
+    use core::option::Option;
+    use core::pedersen::pedersen;
     use core::poseidon::poseidon_hash_span;
+    use core::serde::Serde;
+    use core::traits::{Into, TryInto};
     use openzeppelin::account::interface;
     use starknet::account::Call;
-    use core::pedersen::pedersen;
     use starknet::storage::Map;
     use starknet::syscalls::call_contract_syscall;
     use starknet::{
-        ContractAddress,
-        SyscallResultTrait,
-        get_caller_address,
-        get_contract_address,
+        ContractAddress, SyscallResultTrait, get_caller_address, get_contract_address,
         get_execution_info,
     };
+    use crate::errors::{
+        ERR_ALREADY_CONFIRMED, ERR_BAD_SESSION_NONCE, ERR_BAD_THRESHOLD, ERR_BEFORE_ETA,
+        ERR_GUARDIAN_CALL_DENIED, ERR_GUARDIAN_EXISTS, ERR_GUARDIAN_SIG_INVALID,
+        ERR_NOT_ENOUGH_CONFIRMS, ERR_NOT_GUARDIAN, ERR_NOT_OWNER, ERR_NO_RECOVERY,
+        ERR_OWNER_SIG_INVALID, ERR_POLICY_CALLCAP, ERR_POLICY_CALLCOUNT_MISMATCH,
+        ERR_POLICY_SELECTOR_DENIED, ERR_POLICY_TARGET_DENIED, ERR_RECOVERY_IN_PROGRESS,
+        ERR_RECOVERY_MISMATCH, ERR_SAME_OWNER, ERR_SESSION_EXPIRED, ERR_SESSION_INACTIVE,
+        ERR_SESSION_NOT_READY, ERR_SESSION_SELECTORS_LEN, ERR_SESSION_SIG_INVALID,
+        ERR_SESSION_STALE, ERR_SESSION_TARGETS_LEN, ERR_SIGNATURE_MISSING, ERR_VALUE_LIMIT_EXCEEDED,
+        ERR_ZERO_OWNER,
+    };
+    use crate::session::Session;
+    use super::{AccountComponent, SRC5Component};
 
     component!(path: AccountComponent, storage: account, event: AccountEvent);
     component!(path: SRC5Component, storage: src5, event: SRC5Event);
 
-    const ERC20_TRANSFER_SEL: felt252 = 0x83afd3f4caedc6eebf44246fe54e38c95e3179a5ec9ea81740eca5b482d12e;
+    const ERC20_TRANSFER_SEL: felt252 =
+        0x83afd3f4caedc6eebf44246fe54e38c95e3179a5ec9ea81740eca5b482d12e;
     const APPLY_SESSION_USAGE_SELECTOR: felt252 = starknet::selector!("apply_session_usage");
     const PROPOSE_RECOVERY_SELECTOR: felt252 = starknet::selector!("propose_recovery");
     const CONFIRM_RECOVERY_SELECTOR: felt252 = starknet::selector!("confirm_recovery");
@@ -76,6 +55,7 @@ pub mod UA2Account {
         session_nonce: Map<felt252, u128>,
         session_target_allow: LegacyMap<(felt252, ContractAddress), bool>,
         session_selector_allow: LegacyMap<(felt252, felt252), bool>,
+        session_owner_epoch: u64,
         guardians: LegacyMap<ContractAddress, bool>,
         guardian_count: u32,
         guardian_threshold: u8,
@@ -96,6 +76,7 @@ pub mod UA2Account {
         pub max_calls: u32,
         pub calls_used: u32,
         pub max_value_per_call: u256,
+        pub owner_epoch: u64,
     }
 
     #[derive(Drop, starknet::Event)]
@@ -218,6 +199,7 @@ pub mod UA2Account {
     #[constructor]
     fn constructor(ref self: ContractState, public_key: felt252) {
         self.owner_pubkey.write(public_key);
+        self.session_owner_epoch.write(0_u64);
         self.account.initializer(public_key);
     }
 
@@ -257,11 +239,13 @@ pub mod UA2Account {
         self.recovery_confirm_count.write(0_u32);
     }
 
+    fn _bump_owner_epoch(ref self: ContractState) {
+        let current_epoch = self.session_owner_epoch.read();
+        self.session_owner_epoch.write(current_epoch + 1_u64);
+    }
+
     fn _record_recovery_confirmation(
-        ref self: ContractState,
-        guardian: ContractAddress,
-        proposal_id: u64,
-        last_confirm: u64,
+        ref self: ContractState, guardian: ContractAddress, proposal_id: u64, last_confirm: u64,
     ) -> u32 {
         assert(last_confirm != proposal_id, ERR_ALREADY_CONFIRMED);
 
@@ -349,28 +333,22 @@ pub mod UA2Account {
         let last_confirm = self.recovery_guardian_last_confirm.read(caller);
         if last_confirm != proposal_id {
             let confirm_count = _record_recovery_confirmation(
-                ref self,
-                caller,
-                proposal_id,
-                last_confirm,
+                ref self, caller, proposal_id, last_confirm,
             );
-            self.emit(
-                Event::RecoveryConfirmed(RecoveryConfirmed {
-                    guardian: caller,
-                    new_owner,
-                    count: confirm_count,
-                }),
-            );
+            self
+                .emit(
+                    Event::RecoveryConfirmed(
+                        RecoveryConfirmed { guardian: caller, new_owner, count: confirm_count },
+                    ),
+                );
         }
 
-        self.emit(
-            Event::GuardianProposed(GuardianProposed {
-                guardian: caller,
-                proposal_id,
-                new_owner,
-                eta,
-            }),
-        );
+        self
+            .emit(
+                Event::GuardianProposed(
+                    GuardianProposed { guardian: caller, proposal_id, new_owner, eta },
+                ),
+            );
         self.emit(Event::RecoveryProposed(RecoveryProposed { new_owner, eta }));
     }
 
@@ -389,13 +367,12 @@ pub mod UA2Account {
         let last_confirm = self.recovery_guardian_last_confirm.read(caller);
         let new_count = _record_recovery_confirmation(ref self, caller, proposal_id, last_confirm);
 
-        self.emit(
-            Event::RecoveryConfirmed(RecoveryConfirmed {
-                guardian: caller,
-                new_owner,
-                count: new_count,
-            }),
-        );
+        self
+            .emit(
+                Event::RecoveryConfirmed(
+                    RecoveryConfirmed { guardian: caller, new_owner, count: new_count },
+                ),
+            );
     }
 
     #[external(v0)]
@@ -423,6 +400,7 @@ pub mod UA2Account {
         assert(new_owner != current, ERR_SAME_OWNER);
 
         self.owner_pubkey.write(new_owner);
+        _bump_owner_epoch(ref self);
         self.emit(Event::OwnerRotated(OwnerRotated { new_owner }));
     }
 
@@ -444,18 +422,18 @@ pub mod UA2Account {
         let new_owner = self.recovery_proposed_owner.read();
         let proposal_id = self.recovery_proposal_id.read();
         self.owner_pubkey.write(new_owner);
+        _bump_owner_epoch(ref self);
 
         _clear_recovery_state(ref self);
 
         self.emit(Event::OwnerRotated(OwnerRotated { new_owner }));
         self.emit(Event::RecoveryExecuted(RecoveryExecuted { new_owner }));
-        self.emit(
-            Event::GuardianFinalized(GuardianFinalized {
-                guardian: caller,
-                proposal_id,
-                new_owner,
-            }),
-        );
+        self
+            .emit(
+                Event::GuardianFinalized(
+                    GuardianFinalized { guardian: caller, proposal_id, new_owner },
+                ),
+            );
     }
 
     fn u256_le(lhs: u256, rhs: u256) -> bool {
@@ -511,6 +489,7 @@ pub mod UA2Account {
             max_calls,
             calls_used: 0_u32,
             max_value_per_call: value_cap,
+            owner_epoch: 0_u64,
         };
 
         self.add_session(pubkey, policy);
@@ -537,6 +516,8 @@ pub mod UA2Account {
         let mut policy = self.session.read(key_hash);
 
         require(policy.is_active, ERR_SESSION_INACTIVE);
+        let current_epoch = self.session_owner_epoch.read();
+        require(policy.owner_epoch == current_epoch, ERR_SESSION_STALE);
 
         let now = get_block_timestamp();
         require(now >= policy.valid_after, ERR_SESSION_NOT_READY);
@@ -572,16 +553,22 @@ pub mod UA2Account {
 
             policy.is_active = true;
             policy.calls_used = 0_u32;
+            policy.owner_epoch = self.session_owner_epoch.read();
 
             self.session.write(key_hash, policy);
             self.session_nonce.write(key_hash, 0_u128);
 
-            self.emit(Event::SessionAdded(SessionAdded {
-                key_hash,
-                valid_after: policy.valid_after,
-                valid_until: policy.valid_until,
-                max_calls: policy.max_calls,
-            }));
+            self
+                .emit(
+                    Event::SessionAdded(
+                        SessionAdded {
+                            key_hash,
+                            valid_after: policy.valid_after,
+                            valid_until: policy.valid_until,
+                            max_calls: policy.max_calls,
+                        },
+                    ),
+                );
         }
 
         fn get_session(self: @ContractState, key_hash: felt252) -> SessionPolicy {
@@ -688,9 +675,7 @@ pub mod UA2Account {
     }
 
     fn validate_guardian_authorization(
-        self: @ContractState,
-        signature: Span<felt252>,
-        calls: @Array<Call>,
+        self: @ContractState, signature: Span<felt252>, calls: @Array<Call>,
     ) {
         let signature_len = signature.len();
         require(signature_len == 2_usize, ERR_GUARDIAN_SIG_INVALID);
@@ -737,22 +722,14 @@ pub mod UA2Account {
         nonce: u128,
     ) -> felt252 {
         let mut values = array![
-            SESSION_DOMAIN_TAG,
-            chain_id,
-            account_felt,
-            session_pubkey,
-            key_hash,
-            call_digest,
-            valid_until.into(),
-            nonce.into(),
+            SESSION_DOMAIN_TAG, chain_id, account_felt, session_pubkey, key_hash, call_digest,
+            valid_until.into(), nonce.into(),
         ];
         poseidon_hash_span(values.span())
     }
 
     fn validate_session_policy(
-        self: @ContractState,
-        signature: Span<felt252>,
-        calls: @Array<Call>,
+        self: @ContractState, signature: Span<felt252>, calls: @Array<Call>,
     ) -> SessionValidation {
         let signature_len = signature.len();
         require(signature_len >= 6_usize, ERR_SESSION_SIG_INVALID);
@@ -786,6 +763,8 @@ pub mod UA2Account {
         let policy = self.session.read(key_hash);
 
         require(policy.is_active, ERR_SESSION_INACTIVE);
+        let current_epoch = self.session_owner_epoch.read();
+        require(policy.owner_epoch == current_epoch, ERR_SESSION_STALE);
 
         let now = get_block_timestamp();
         require(now >= policy.valid_after, ERR_SESSION_NOT_READY);
@@ -901,7 +880,7 @@ pub mod UA2Account {
                     APPLY_SESSION_USAGE_SELECTOR,
                     accounting_calldata.span(),
                 )
-                .unwrap_syscall();
+                    .unwrap_syscall();
 
                 return;
             }
@@ -914,9 +893,9 @@ pub mod UA2Account {
 
             let owner_signature = extract_owner_signature(signature);
             let owner_signature_span = owner_signature.span();
-            let owner_valid = AccountComponent::InternalImpl::<ContractState>::_is_valid_signature(
-                self.account, tx_hash, owner_signature_span
-            );
+            let owner_valid = AccountComponent::InternalImpl::<
+                ContractState,
+            >::_is_valid_signature(self.account, tx_hash, owner_signature_span);
 
             require(owner_valid, ERR_OWNER_SIG_INVALID);
 
@@ -944,9 +923,9 @@ pub mod UA2Account {
 
             let owner_signature = extract_owner_signature(signature);
             let owner_signature_span = owner_signature.span();
-            let owner_valid = AccountComponent::InternalImpl::<ContractState>::_is_valid_signature(
-                self.account, tx_hash, owner_signature_span
-            );
+            let owner_valid = AccountComponent::InternalImpl::<
+                ContractState,
+            >::_is_valid_signature(self.account, tx_hash, owner_signature_span);
 
             require(owner_valid, ERR_OWNER_SIG_INVALID);
 
@@ -956,21 +935,21 @@ pub mod UA2Account {
         fn is_valid_signature(
             self: @ContractState, hash: felt252, signature: Array<felt252>,
         ) -> felt252 {
-            AccountComponent::AccountMixinImpl::<ContractState>::is_valid_signature(
-                self, hash, signature
-            )
+            AccountComponent::AccountMixinImpl::<
+                ContractState,
+            >::is_valid_signature(self, hash, signature)
         }
 
         fn supports_interface(self: @ContractState, interface_id: felt252) -> bool {
-            AccountComponent::AccountMixinImpl::<ContractState>::supports_interface(
-                self, interface_id
-            )
+            AccountComponent::AccountMixinImpl::<
+                ContractState,
+            >::supports_interface(self, interface_id)
         }
 
         fn __validate_declare__(self: @ContractState, class_hash: felt252) -> felt252 {
-            AccountComponent::AccountMixinImpl::<ContractState>::__validate_declare__(
-                self, class_hash
-            )
+            AccountComponent::AccountMixinImpl::<
+                ContractState,
+            >::__validate_declare__(self, class_hash)
         }
 
         fn __validate_deploy__(
@@ -979,9 +958,9 @@ pub mod UA2Account {
             contract_address_salt: felt252,
             public_key: felt252,
         ) -> felt252 {
-            AccountComponent::AccountMixinImpl::<ContractState>::__validate_deploy__(
-                self, class_hash, contract_address_salt, public_key
-            )
+            AccountComponent::AccountMixinImpl::<
+                ContractState,
+            >::__validate_deploy__(self, class_hash, contract_address_salt, public_key)
         }
 
         fn get_public_key(self: @ContractState) -> felt252 {
@@ -991,29 +970,27 @@ pub mod UA2Account {
         fn set_public_key(
             ref self: ContractState, new_public_key: felt252, signature: Span<felt252>,
         ) {
-            AccountComponent::AccountMixinImpl::<ContractState>::set_public_key(
-                ref self, new_public_key, signature
-            );
+            AccountComponent::AccountMixinImpl::<
+                ContractState,
+            >::set_public_key(ref self, new_public_key, signature);
         }
 
         fn isValidSignature(
             self: @ContractState, hash: felt252, signature: Array<felt252>,
         ) -> felt252 {
-            AccountComponent::AccountMixinImpl::<ContractState>::isValidSignature(
-                self, hash, signature
-            )
+            AccountComponent::AccountMixinImpl::<
+                ContractState,
+            >::isValidSignature(self, hash, signature)
         }
 
         fn getPublicKey(self: @ContractState) -> felt252 {
             AccountComponent::AccountMixinImpl::<ContractState>::getPublicKey(self)
         }
 
-        fn setPublicKey(
-            ref self: ContractState, newPublicKey: felt252, signature: Span<felt252>,
-        ) {
-            AccountComponent::AccountMixinImpl::<ContractState>::setPublicKey(
-                ref self, newPublicKey, signature
-            );
+        fn setPublicKey(ref self: ContractState, newPublicKey: felt252, signature: Span<felt252>) {
+            AccountComponent::AccountMixinImpl::<
+                ContractState,
+            >::setPublicKey(ref self, newPublicKey, signature);
         }
     }
     impl AccountInternalImpl = AccountComponent::InternalImpl<ContractState>;

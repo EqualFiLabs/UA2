@@ -1,26 +1,15 @@
 use core::integer::u256;
+use core::pedersen::pedersen;
 use core::result::ResultTrait;
 use snforge_std::{
-    declare,
-    spy_events,
-    start_cheat_caller_address,
-    stop_cheat_caller_address,
-    ContractClassTrait,
-    DeclareResultTrait,
-    EventSpyAssertionsTrait,
+    ContractClassTrait, DeclareResultTrait, EventSpyAssertionsTrait, declare, spy_events,
+    start_cheat_caller_address, stop_cheat_caller_address,
 };
 use starknet::SyscallResultTrait;
 use ua2_contracts::ua2_account::UA2Account::{
-    self,
-    SessionAdded,
-    SessionPolicy,
+    self, ISessionManagerDispatcher, ISessionManagerDispatcherTrait, SessionAdded, SessionPolicy,
     SessionRevoked,
 };
-use ua2_contracts::ua2_account::UA2Account::{
-    ISessionManagerDispatcher,
-    ISessionManagerDispatcherTrait,
-};
-use core::pedersen::pedersen;
 
 const OWNER_PUBKEY: felt252 = 0x12345;
 
@@ -47,6 +36,7 @@ fn add_get_revoke_session_works() {
         max_calls: 5_u32,
         calls_used: 2_u32,
         max_value_per_call: u256 { low: 0, high: 0 },
+        owner_epoch: 0_u64,
     };
 
     dispatcher.add_session(key, policy);
@@ -56,6 +46,7 @@ fn add_get_revoke_session_works() {
     assert(stored_policy.valid_until == 3_600_u64, 'expiry mismatch');
     assert(stored_policy.max_calls == 5_u32, 'max calls mismatch');
     assert(stored_policy.calls_used == 0_u32, 'calls used not reset');
+    assert(stored_policy.owner_epoch == 0_u64, 'unexpected session epoch');
 
     dispatcher.revoke_session(key_hash);
 
@@ -81,6 +72,7 @@ fn events_emitted() {
         max_calls: 10_u32,
         calls_used: 0_u32,
         max_value_per_call: u256 { low: 0, high: 0 },
+        owner_epoch: 0_u64,
     };
 
     dispatcher.add_session(key, policy);
@@ -88,19 +80,18 @@ fn events_emitted() {
 
     stop_cheat_caller_address(contract_address);
 
-    spy.assert_emitted(@array![
-        (
-            contract_address,
-            UA2Account::Event::SessionAdded(SessionAdded {
-                key_hash,
-                valid_after: 0_u64,
-                valid_until: 7_200_u64,
-                max_calls: 10_u32,
-            }),
-        ),
-        (
-            contract_address,
-            UA2Account::Event::SessionRevoked(SessionRevoked { key_hash }),
-        ),
-    ]);
+    spy
+        .assert_emitted(
+            @array![
+                (
+                    contract_address,
+                    UA2Account::Event::SessionAdded(
+                        SessionAdded {
+                            key_hash, valid_after: 0_u64, valid_until: 7_200_u64, max_calls: 10_u32,
+                        },
+                    ),
+                ),
+                (contract_address, UA2Account::Event::SessionRevoked(SessionRevoked { key_hash })),
+            ],
+        );
 }

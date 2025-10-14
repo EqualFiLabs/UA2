@@ -1,39 +1,22 @@
 use core::array::{Array, ArrayTrait, SpanTrait};
 use core::integer::u256;
 use core::option::Option;
-use core::traits::{Into, TryInto};
 use core::serde::Serde;
+use core::traits::{Into, TryInto};
 use snforge_std::{
-    declare,
-    spy_events,
-    start_cheat_block_timestamp,
-    stop_cheat_block_timestamp,
-    start_cheat_caller_address,
-    stop_cheat_caller_address,
-    start_cheat_signature,
-    stop_cheat_signature,
-    ContractClassTrait,
-    DeclareResultTrait,
-    EventSpyAssertionsTrait,
+    ContractClassTrait, DeclareResultTrait, EventSpyAssertionsTrait, declare, spy_events,
+    start_cheat_block_timestamp, start_cheat_caller_address, start_cheat_signature,
+    stop_cheat_block_timestamp, stop_cheat_caller_address, stop_cheat_signature,
 };
 use starknet::account::Call;
 use starknet::syscalls::call_contract_syscall;
 use starknet::{ContractAddress, SyscallResultTrait};
-use ua2_contracts::ua2_account::UA2Account::{
-    Event,
-    ISessionManagerDispatcher,
-    ISessionManagerDispatcherTrait,
-    SessionNonceAdvanced,
-    SessionPolicy,
-    SessionUsed,
-};
 use ua2_contracts::session::Session;
-
-use crate::session_test_utils::{
-    build_session_signature,
-    session_key,
-    session_key_hash,
+use ua2_contracts::ua2_account::UA2Account::{
+    Event, ISessionManagerDispatcher, ISessionManagerDispatcherTrait, SessionNonceAdvanced,
+    SessionPolicy, SessionUsed,
 };
+use crate::session_test_utils::{build_session_signature, session_key, session_key_hash};
 
 const OWNER_PUBKEY: felt252 = 0x12345;
 const TRANSFER_SELECTOR: felt252 = starknet::selector!("transfer");
@@ -59,6 +42,7 @@ fn session_allows_whitelisted_calls() {
         max_calls: 1_u32,
         calls_used: 0_u32,
         max_value_per_call: u256 { low: 1_000_u128, high: 0_u128 },
+        owner_epoch: 0_u64,
     };
 
     start_cheat_block_timestamp(account_address, 5_000_u64);
@@ -91,12 +75,13 @@ fn session_allows_whitelisted_calls() {
         starknet::selector!("add_session_with_allowlists"),
         allowlist_calldata.span(),
     )
-    .unwrap_syscall();
+        .unwrap_syscall();
     stop_cheat_caller_address(account_address);
 
     let session_dispatcher = ISessionManagerDispatcher { contract_address: account_address };
     let stored_policy = session_dispatcher.get_session(key_hash);
     assert(stored_policy.is_active == true, 'session inactive');
+    assert(stored_policy.owner_epoch == 0_u64, 'unexpected session epoch');
 
     let amount = u256 { low: 500_u128, high: 0_u128 };
     let to: ContractAddress = account_address;
@@ -111,45 +96,38 @@ fn session_allows_whitelisted_calls() {
 
     let zero_contract: ContractAddress = 0.try_into().unwrap();
     start_cheat_caller_address(account_address, zero_contract);
-    let signature: Array<felt252> =
-        build_session_signature(
-            account_address,
-            session_pubkey,
-            0_u128,
-            policy.valid_until,
-            @calls,
-        );
+    let signature: Array<felt252> = build_session_signature(
+        account_address, session_pubkey, 0_u128, policy.valid_until, @calls,
+    );
     start_cheat_signature(account_address, signature.span());
     let mut execute_calldata = array![];
     Serde::<Array<Call>>::serialize(@calls, ref execute_calldata);
     call_contract_syscall(
-        account_address,
-        starknet::selector!("__execute__"),
-        execute_calldata.span(),
+        account_address, starknet::selector!("__execute__"), execute_calldata.span(),
     )
-    .unwrap_syscall();
+        .unwrap_syscall();
 
     stop_cheat_signature(account_address);
     stop_cheat_caller_address(account_address);
     stop_cheat_block_timestamp(account_address);
 
-    spy.assert_emitted(@array![
-        (
-            account_address,
-            Event::SessionUsed(SessionUsed { key_hash, used: 1_u32 }),
-        ),
-        (
-            account_address,
-            Event::SessionNonceAdvanced(SessionNonceAdvanced { key_hash, new_nonce: 1_u128 }),
-        ),
-    ]);
+    spy
+        .assert_emitted(
+            @array![
+                (account_address, Event::SessionUsed(SessionUsed { key_hash, used: 1_u32 })),
+                (
+                    account_address,
+                    Event::SessionNonceAdvanced(
+                        SessionNonceAdvanced { key_hash, new_nonce: 1_u128 },
+                    ),
+                ),
+            ],
+        );
 
     let get_last_result = call_contract_syscall(
-        mock_address,
-        starknet::selector!("get_last"),
-        array![].span(),
+        mock_address, starknet::selector!("get_last"), array![].span(),
     )
-    .unwrap_syscall();
+        .unwrap_syscall();
 
     let recorded_to_felt = *get_last_result.at(0);
     let recorded_low_felt = *get_last_result.at(1);

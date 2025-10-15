@@ -115,23 +115,6 @@ automated run.
 > top up the account with STRK/ETH from your faucet or bridge of choice before
 > deploying.
 
-### 4. Run demo app
-
-```bash
-export $(grep -v '^#' ./.env.sepolia | xargs)
-npm run dev
-```
-
-* Connect wallet (Argent X / Braavos)
-* Create session → call via session key
-* Try gasless call with paymaster
-* Revoke session → call fails
-* (Optional) Guardian recovery flow
-
-For full walkthrough: [`docs/runbook-sepolia.md`](./docs/runbook-sepolia.md)
-
----
-
 ## 🧪 Testing
 
 * **Cairo unit tests:**
@@ -150,20 +133,6 @@ For full walkthrough: [`docs/runbook-sepolia.md`](./docs/runbook-sepolia.md)
 
   ```bash
   npm run test:unit
-  ```
-* **E2E on devnet:**
-
-  ```bash
-  npm run e2e:devnet
-  ```
-
-  > [!TIP]
-  > Use the devnet + `sncast` recipe in [`docs/runbook-sepolia.md`](./docs/runbook-sepolia.md) to
-  > create/fund the named account and deploy the UA² class before running the suite.
-* **E2E on Sepolia:**
-
-  ```bash
-  npm run e2e:sepolia
   ```
 
 ### Manual CLI demo (`run.sh`)

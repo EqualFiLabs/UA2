@@ -19,7 +19,7 @@ module.exports = {
     'import/resolver': {
       typescript: {
         project: [
-          'tsconfig.base.json',
+          'tsconfig.eslint.json',
           'packages/*/tsconfig.json',
           'packages/*/tsconfig.eslint.json'
         ],

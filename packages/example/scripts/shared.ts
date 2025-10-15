@@ -13,7 +13,9 @@ import {
   json,
   num,
   RpcProvider,
+  v2hash,
   type CompiledContract,
+  type CompiledSierra,
 } from 'starknet';
 
 import type { CallTransport, Felt } from '@ua2/core';
@@ -192,21 +194,21 @@ export async function ensureUa2Deployed(
   const submitDeclareV2 = async (): Promise<{ classHash: Felt; txHash: Felt }> => {
     const nonceRaw = await toolkit.provider.getNonceForAddress(toolkit.deployer.address);
     const nonce = normalizeHex(nonceRaw);
-    const declareTxHashHex = hash.calculateDeclareTransactionHash2(
-      sierraHash,
-      toolkit.deployer.address,
-      '0x2',
-      declareMaxFee,
-      toolkit.chainId,
-      nonce,
-      casmHash
+    const declareTxHashHex = normalizeHex(
+      v2hash.calculateDeclareTransactionHash(
+        sierraHash,
+        toolkit.deployer.address,
+        '0x2',
+        declareMaxFee,
+        toolkit.chainId as any,
+        nonce,
+        casmHash
+      )
     );
-    const declareTxHashBig = BigInt(declareTxHashHex);
-    const priv = BigInt(normalizePrivateKey(toolkit.deployerKey));
-    const sig = ec.starkCurve.sign(declareTxHashBig, priv);
+    const sig = ec.starkCurve.sign(declareTxHashHex, normalizePrivateKey(toolkit.deployerKey));
     const signature = [
-      normalizeHex('0x' + sig.r.toString(16)),
-      normalizeHex('0x' + sig.s.toString(16)),
+      normalizeHex(num.toHex(sig.r)),
+      normalizeHex(num.toHex(sig.s)),
     ];
 
     const body = {
@@ -534,7 +536,7 @@ export function extractRevertReason(receipt: any): string {
 }
 
 async function loadUa2Artifacts(): Promise<{
-  compiledContract: CompiledContract;
+  compiledContract: CompiledSierra;
   casm: any;
 }> {
   const targetDir = path.resolve(CONTRACTS_ROOT, 'target/dev');
@@ -550,6 +552,9 @@ async function loadUa2Artifacts(): Promise<{
   const compiledContract = json.parse(
     await fsPromises.readFile(path.join(targetDir, contractFile), 'utf8')
   ) as CompiledContract;
+  if (!isCompiledSierra(compiledContract)) {
+    throw new Error('UA² contract artifact is not Sierra (did you build with Cairo ≥2?)');
+  }
   const casm = json.parse(await fsPromises.readFile(path.join(targetDir, casmFile), 'utf8'));
 
   return { compiledContract, casm };
@@ -594,6 +599,15 @@ export function selectorFor(name: string): Felt {
 }
 
 // Sanitize any felt-like string into a clean 0x-prefixed hex number
+function isCompiledSierra(contract: CompiledContract): contract is CompiledSierra {
+  return (
+    contract !== null &&
+    typeof contract === 'object' &&
+    'sierra_program' in contract &&
+    'contract_class_version' in contract
+  );
+}
+
 function sanitizeFeltLike(x: string): Felt {
   let s = x.trim().toLowerCase();
   while (s.startsWith('0x')) s = s.slice(2);
@@ -670,7 +684,7 @@ function insaneResourceBounds(): ResourceBoundsV3 {
  *  - (owner_pubkey: felt, guardian_address: felt)
  * If your constructor differs, this throws with a helpful message.
  */
-function buildUa2ConstructorCalldata(_compiled: CompiledContract, toolkit: Toolkit): Felt[] {
+function buildUa2ConstructorCalldata(_compiled: CompiledSierra, toolkit: Toolkit): Felt[] {
   // UA² constructor: (public_key: felt252)
   const owner = sanitizeFeltLike(toolkit.ownerPubKey);
   return [owner];

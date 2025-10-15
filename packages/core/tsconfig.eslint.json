@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@ua2/paymasters": ["../paymasters/src/index.ts"],
+      "@ua2/paymasters/*": ["../paymasters/src/*"]
+    }
+  },
+  "include": ["src", "tests"]
+}

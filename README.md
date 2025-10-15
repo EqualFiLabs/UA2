@@ -166,6 +166,36 @@ For full walkthrough: [`docs/runbook-sepolia.md`](./docs/runbook-sepolia.md)
   npm run e2e:sepolia
   ```
 
+### Manual CLI demo (`run.sh`)
+
+For reviewers who want to watch the interactive `sncast` + curl flow, we keep the repo-local
+`run.sh`. It walks through account creation, funding, deployment, and the session-key happy/
+sad-path calls while teeing all output into `ua2_e2e_demo.log`.
+
+1. Prereqs: Starknet devnet running at `http://127.0.0.1:5050`, the UA² class declared, and
+   `sncast` ≥ 0.50.0 available on your `PATH` (plus `curl`, `jq`, `node`, `date`).
+2. Export the values the script needs:
+   ```bash
+   export UA2_CLASS_HASH=0x...
+   export UA2_DEVNET_OWNER_PRIVATE_KEY=0x...   # 32B hex private key you control on devnet
+   export TARGET_ADDRESS=0x...                 # e.g. mock ERC20 you want to permit
+   export UA2_NAME=ua2                         # optional; defaults to "ua2"
+   export RPC=http://127.0.0.1:5050            # optional; defaults to devnet URL above
+   ```
+3. If you want a clean slate, delete the prior account/profile first:
+   ```bash
+   sncast account delete --name "${UA2_NAME:-ua2}"
+   ```
+4. Run the walkthrough:
+   ```bash
+   ./run.sh
+   ```
+   The pauses will prompt in interactive terminals; in CI/non-TTY contexts they auto-advance with
+   a short delay. Step three now mints **FRI (STRK)** by default so deployments succeed on the
+   latest devnet builds.
+5. Inspect `ua2_e2e_demo.log` for the captured transcript, including the expected `ERR_POLICY_CALLCAP`
+   revert on the final session call.
+
 Coverage and case mapping: [`docs/test-plan.md`](./docs/test-plan.md)
 
 ---

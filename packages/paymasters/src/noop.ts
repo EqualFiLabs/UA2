@@ -61,7 +61,7 @@ function toBigInt(value: FeltLike, label: string): bigint {
 }
 
 function formatFelt(value: bigint): string {
-  return `0x${value.toString(16)}`;
+  return `0x${value.toString(16).toUpperCase()}`;
 }
 
 function totalCalldataLength(calls: AccountCall[]): number {

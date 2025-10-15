@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { withPaymaster, NoopPaymaster } from '../src/paymasters';
+import { withPaymaster } from '../src/paymasterRunner';
+import { NoopPaymaster } from '../src/paymasters';
 import { paymasterFrom } from '../src/paymastersFactory';
 import { PaymasterDeniedError } from '../src/errors';
 import type {

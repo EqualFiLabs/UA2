@@ -14,10 +14,11 @@
   "dependencies": {
     "@ua2/core": "file:../core",
     "@ua2/react": "file:../react",
+    "@ua2/paymasters": "file:../paymasters",
     "dotenv": "^16.4.5",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "starknet": "^6.10.0"
+    "starknet": "^8.5.5"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^6.4.2",

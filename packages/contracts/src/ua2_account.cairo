@@ -743,6 +743,19 @@ pub mod UA2Account {
         owner_signature
     }
 
+    fn assert_valid_owner_signature(
+        self: @ContractState, tx_hash: felt252, signature: Span<felt252>,
+    ) {
+        let sig_len = signature.len();
+        require(sig_len >= 2_usize, ERR_OWNER_SIG_INVALID);
+
+        let owner_valid = AccountComponent::InternalImpl::<
+            ContractState,
+        >::_is_valid_signature(self.account, tx_hash, signature);
+
+        require(owner_valid, ERR_OWNER_SIG_INVALID);
+    }
+
     fn validate_guardian_authorization(
         self: @ContractState, signature: Span<felt252>, calls: @Array<Call>,
     ) {
@@ -936,11 +949,7 @@ pub mod UA2Account {
 
             let owner_signature = extract_owner_signature(signature);
             let owner_signature_span = owner_signature.span();
-            let owner_valid = AccountComponent::InternalImpl::<
-                ContractState,
-            >::_is_valid_signature(self.account, tx_hash, owner_signature_span);
-
-            require(owner_valid, ERR_OWNER_SIG_INVALID);
+            assert_valid_owner_signature(self, tx_hash, owner_signature_span);
 
             AccountComponent::AccountMixinImpl::<ContractState>::__execute__(self, calls);
         }
@@ -981,11 +990,7 @@ pub mod UA2Account {
 
             let owner_signature = extract_owner_signature(signature);
             let owner_signature_span = owner_signature.span();
-            let owner_valid = AccountComponent::InternalImpl::<
-                ContractState,
-            >::_is_valid_signature(self.account, tx_hash, owner_signature_span);
-
-            require(owner_valid, ERR_OWNER_SIG_INVALID);
+            assert_valid_owner_signature(self, tx_hash, owner_signature_span);
 
             AccountComponent::AccountMixinImpl::<ContractState>::__validate__(self, calls)
         }
@@ -1016,9 +1021,15 @@ pub mod UA2Account {
             contract_address_salt: felt252,
             public_key: felt252,
         ) -> felt252 {
-            AccountComponent::AccountMixinImpl::<
-                ContractState,
-            >::__validate_deploy__(self, class_hash, contract_address_salt, public_key)
+            let tx_info = starknet::get_tx_info().unbox();
+            let signature = tx_info.signature;
+            require(signature.len() > 0_usize, ERR_SIGNATURE_MISSING);
+
+            let owner_signature = extract_owner_signature(signature);
+            let tx_hash = tx_info.transaction_hash;
+            assert_valid_owner_signature(self, tx_hash, owner_signature.span());
+
+            starknet::VALIDATED
         }
 
         fn get_public_key(self: @ContractState) -> felt252 {

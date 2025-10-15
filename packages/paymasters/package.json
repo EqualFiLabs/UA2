@@ -3,9 +3,16 @@
   "version": "0.1.0",
   "type": "module",
   "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./src/index.ts"
+    }
+  },
   "files": [
-    "dist"
+    "dist",
+    "src"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
@@ -14,6 +21,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "starknet": "^8.5.5",
     "tslib": "^2.6.2"
   },
   "devDependencies": {

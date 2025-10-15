@@ -13,7 +13,7 @@ import { BraavosConnector } from './providers/braavos';
 import { CartridgeConnector } from './providers/cartridge';
 import { InjectedConnector } from './providers/injected';
 import { makeSessionsManager } from './sessions';
-import { withPaymaster as createPaymasterRunner } from './paymasters';
+import { withPaymaster as createPaymasterRunner } from './paymasterRunner';
 import { PaymasterDeniedError, ProviderUnavailableError } from './errors';
 
 const ALL_CONNECTORS: Record<string, () => WalletConnector> = {

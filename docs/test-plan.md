@@ -66,8 +66,8 @@ Matrix:
    - Target not in list → `ERR_POLICY_TARGET_DENIED`.
 
 5. **Value Caps**
-   - `value <= max_value_per_call` → OK.
-   - `value > max_value_per_call` → `ERR_VALUE_LIMIT_EXCEEDED`.
+   - `value <= max_value_per_call` on `ERC20::transfer`/`transferFrom` → OK.
+   - `value > max_value_per_call` for either selector → `ERR_VALUE_LIMIT_EXCEEDED`.
 
 6. **Revocation**
    - After `revoke_session`, any use → `ERR_SESSION_INACTIVE`.

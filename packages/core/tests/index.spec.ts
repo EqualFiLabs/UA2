@@ -8,7 +8,8 @@ describe('index exports', () => {
 
   it('exposes UA2 helpers', () => {
     expect(typeof UA2.connect).toBe('function');
-    expect(typeof UA2.paymasters.from).toBe('function');
+    expect(typeof UA2.paymasters.noop).toBe('function');
+    expect(typeof UA2.paymasters.avnu).toBe('function');
     expect(typeof UA2.sessions.guard).toBe('function');
   });
 });

@@ -632,7 +632,10 @@ function PaymasterControls({ client }: PaymasterControlsProps): JSX.Element {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const paymaster = useMemo(() => new NoopPaymaster(useSponsor ? 'demo-sponsor' : 'direct'), [useSponsor]);
+  const paymaster = useMemo(
+    () => new NoopPaymaster({ name: useSponsor ? 'demo-sponsor' : 'direct' }),
+    [useSponsor]
+  );
 
   const paymasterRunner = useMemo(() => {
     if (!transport) return null;

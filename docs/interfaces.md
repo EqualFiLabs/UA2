@@ -31,6 +31,7 @@ struct SessionPolicy {
     max_calls: u32,
     calls_used: u32,
     max_value_per_call: Uint256,
+    owner_epoch: u64,
 }
 ```
 
@@ -39,6 +40,8 @@ The selector and target allowlists are not embedded in the struct. They are stor
 > **Notes:**
 > * Supplying empty target and selector lists is permitted, but such a session cannot execute any calls (all lookups fall back to `false`).
 > * To keep storage writes + gas predictable in v0, prefer allowlists with ≲32 entries per list.
+> * Value caps apply to ERC-20 `transfer` and `transferFrom` calls enforced via the selector allowlist.
+> * `owner_epoch` tracks the owner/recovery epoch so old sessions become stale after rotations.
 
 ---
 
@@ -53,6 +56,8 @@ The selector and target allowlists are not embedded in the struct. They are stor
 * `ThresholdSet(threshold: u8)`
 * `RecoveryDelaySet(delay: u64)`
 * `OwnerRotated(new_owner: felt252)`
+* `GuardianProposed(guardian: ContractAddress, proposal_id: u64, new_owner: felt252, eta: u64)`
+* `GuardianFinalized(guardian: ContractAddress, proposal_id: u64, new_owner: felt252)`
 * `RecoveryProposed(new_owner: felt252, eta: u64)`
 * `RecoveryConfirmed(guardian: ContractAddress, new_owner: felt252, count: u32)`
 * `RecoveryCanceled()`
@@ -95,4 +100,5 @@ The contract reverts with the following identifiers:
 * `ERR_NOT_OWNER`
 * `ERR_ZERO_OWNER`
 * `ERR_SAME_OWNER`
+* `ERR_UNSUPPORTED_AUTH_MODE`
 

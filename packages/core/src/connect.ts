@@ -110,7 +110,11 @@ function mkClient(
     connectorLabel: connector.label,
     account,
     address: account.address,
-    sessions: makeSessionsManager({ account }),
+    sessions: makeSessionsManager({
+      account,
+      transport: account.transport,
+      ua2Address: account.ua2Address ?? account.address,
+    }),
     withPaymaster,
     async disconnect() {
       // No-ops for now; real adapters can tear down sessions if needed.

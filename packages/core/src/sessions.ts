@@ -40,6 +40,7 @@ class SessionsImpl implements SessionsManager {
   private readonly sessions: Session[] = [];
 
   constructor({ account, transport, ua2Address }: CtorArgs) {
+    // Save transport and UA² address for on-chain interactions.
     void account; // reserved for future features (e.g., paymaster hints)
     this.transport = transport;
     this.ua2 = ua2Address;
@@ -55,8 +56,7 @@ class SessionsImpl implements SessionsManager {
     const { policyCalldata, allowCalldata } = buildPolicyCalldata(resolved);
     const calldata = buildAddSessionCalldata(sessionId, pubkey, policyCalldata, allowCalldata);
 
-    // If we have a transport + ua2 address, we could call add_session_with_allowlists here.
-    // Keeping it local-only for now (no RPC in tests).
+    // Register the session on-chain if a transport and UA² address are provided.
     if (this.transport && this.ua2) {
       await this.transport.invoke(this.ua2, 'add_session_with_allowlists', calldata);
     }
@@ -75,8 +75,10 @@ class SessionsImpl implements SessionsManager {
     // Mark local store only; on-chain call can be plugged via transport later.
     const s = this.sessions.find((x) => x.id === sessionId);
     if (s) s.policy = { ...s.policy, active: false };
-    // Example (future):
-    // await this.transport?.invoke(this.ua2!, 'revoke_session', [sessionId]);
+    // Revoke the session on-chain when a transport and UA² address are provided.
+    if (this.transport && this.ua2) {
+      await this.transport.invoke(this.ua2, 'revoke_session', [sessionId]);
+    }
   }
 
   async list(): Promise<Session[]> {

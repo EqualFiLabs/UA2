@@ -16,3 +16,9 @@ snforge_std = { git = "https://github.com/foundry-rs/starknet-foundry.git", tag 
 name = "ua2account"
 casm = true
 sierra = true
+
+# UA² proxy contract
+[[target.starknet-contract]]
+name = "ua2proxy"
+sierra = true
+casm = true

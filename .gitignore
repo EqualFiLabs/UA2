@@ -9,6 +9,7 @@ coverage/
 !.env.sepolia.example
 !packages/contracts/scripts/.env.sepolia.example
 target/
+packages/contracts/target/
 scarb.lock
 .snfoundry_cache/
 .DS_Store

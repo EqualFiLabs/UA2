@@ -1,37 +1,74 @@
+import { Account } from 'starknet';
 import type { WalletConnector, UA2AccountLike } from '../types';
 import { getGlobalObject, readBooleanHint, readStringHint, readTransportHint } from './hints';
 
 /**
- * Argent X connector (minimal). We do a soft probe; real integration
- * can wrap starknet.js's injected provider later.
+ * Argent X connector backed by starknet.js.
+ * Detects the injected Argent provider and establishes an account session.
  */
-
 export class ArgentConnector implements WalletConnector {
   readonly id = 'argent';
   readonly label = 'Argent X';
 
   async isAvailable(opts?: Record<string, unknown>): Promise<boolean> {
-    // Soft detection:
-    // - window.starknet_argentX (browser)
-    // - explicit test hint: opts?.__available === true
-    // Since tests run in node, rely on hints.
     if (readBooleanHint(opts, '__available') === true) return true;
-
-    const w = getGlobalObject();
+    const w = getGlobalObject() as any;
     return Boolean(w?.starknet_argentX || w?.argentX);
   }
 
   async connect(opts?: Record<string, unknown>): Promise<UA2AccountLike> {
-    // For now, simulate minimal session. Real adapter will request accounts.
-    const address = readStringHint(opts, '__address') ?? '0xARGENT_PLACEHOLDER';
-    const chainId =
-      readStringHint(opts, '__chainId') ?? '0x5345504f4c4941'; // 'SEPOLIA' bytes as hex-ish placeholder
+    // Use hints for unit tests or non-browser contexts
+    const hintAddr = readStringHint(opts, '__address');
+    if (hintAddr) {
+      return {
+        address: hintAddr,
+        chainId: readStringHint(opts, '__chainId'),
+        label: this.label,
+        transport: readTransportHint(opts, '__transport'),
+        ua2Address: readStringHint(opts, '__ua2Address'),
+        entrypoint: readStringHint(opts, '__entrypoint'),
+      };
+    }
 
+    const w = getGlobalObject() as any;
+    const provider = w?.starknet_argentX || w?.argentX;
+    if (!provider) {
+      throw new Error('Argent X provider not found');
+    }
+    // Request connection; returns an account-like object
+    const wallet = await provider.enable();
+    const signer = wallet?.account?.signer ?? provider?.signer;
+    const account =
+      wallet?.account ??
+      (signer ? new Account(provider.provider, wallet.selectedAddress, signer) : undefined);
+    if (!account) {
+      throw new Error('Argent X account not available');
+    }
+    const fallbackAddress = wallet?.selectedAddress ?? wallet?.accounts?.[0];
+    const address: string = account.address ?? fallbackAddress;
+    if (!address) {
+      throw new Error('Argent X address unavailable');
+    }
+    let chainId: string | undefined;
+    try {
+      chainId = await provider.provider.getChainId();
+    } catch {
+      chainId = undefined;
+    }
+    const transport = {
+      async invoke(addr: string, entry: string, calldata: string[]) {
+        const { transaction_hash } = await account.execute(
+          { contractAddress: addr, entrypoint: entry, calldata },
+          { maxFee: undefined }
+        );
+        return { txHash: transaction_hash as string };
+      },
+    };
     return {
       address,
       chainId,
       label: this.label,
-      transport: readTransportHint(opts, '__transport'),
+      transport,
       ua2Address: readStringHint(opts, '__ua2Address'),
       entrypoint: readStringHint(opts, '__entrypoint'),
     };

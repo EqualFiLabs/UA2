@@ -3,8 +3,8 @@ import { limits, makeSessionsManager, guard, useSession, sessions as sessionHelp
 import { toUint256, uint256ToHexParts } from './utils/u256';
 import { toFelt, hexPadFelt } from './utils/felt';
 import { withPaymaster } from './paymasterRunner';
-import { NoopPaymaster, AvnuPaymaster, paymasters } from './paymasters';
-import { paymasterFrom } from './paymastersFactory';
+import { NoopPaymaster, AvnuPaymaster, paymasters as paymasterConstructors } from './paymasters';
+import { paymasters as paymastersFactory, paymasterFrom } from './paymastersFactory';
 import {
   UA2Error,
   ProviderUnavailableError,
@@ -44,6 +44,8 @@ export { limits, makeSessionsManager, guard, useSession, sessionHelpers as sessi
 export { toUint256, uint256ToHexParts };
 export { toFelt, hexPadFelt };
 export { withPaymaster };
+const paymasters = { ...paymasterConstructors, ...paymastersFactory };
+
 export { NoopPaymaster, AvnuPaymaster };
 export { paymasters, paymasterFrom };
 export {

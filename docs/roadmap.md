@@ -16,15 +16,19 @@ Status: Draft (Resolve Hackathon)
 - Expand test coverage with fuzz + property tests.
 - Add default policy templates (ERC-20 only, NFT only).
 - SDK: error typing and improved dev ergonomics.
-- Additional paymaster adapters (AVNU, Infura sponsor).
+- Proxy deployment via `ua2proxy.cairo` with runbook + env flag support.
+- Avnu paymaster integration for Sepolia sponsorship.
 
 ---
 
 ## v0.3
+- Implement `apply_session_usage` to synchronize on-chain counters with the SDK.
 - WebAuthn session keys (passkeys).
 - Guardian UX improvements: guardian list UI, guardian contract accounts.
 - Multi-sig owner support (threshold m-of-n at owner level).
 - More wallet connectors (mobile Argent/Braavos, WalletConnect).
+- Additional paymaster adapters beyond Avnu (Infura sponsor, ecosystem partners).
+- Further optimisation of session storage and calldata footprints.
 
 ---
 

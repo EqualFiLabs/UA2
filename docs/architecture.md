@@ -71,3 +71,8 @@
 - **Wallet vendors:** Provide signing capabilities; not trusted with recovery or policies.
 - **Paymasters:** Sponsor gas; not trusted with signing or recovery.
 
+---
+
+## Proxy Pattern and Upgradeability
+
+UA² ships with a UUPS-style proxy (`ua2proxy.cairo`) that holds the implementation class hash and proxy admin address in storage. The proxy forwards external calls to the current implementation via `delegate_call`, preserving the caller context while reusing the account storage. Deployments performed with `UA2_USE_PROXY=1` provision the proxy contract, point it at the UA² implementation, and allow controlled upgrades by invoking the `upgrade` entrypoint from the admin account.

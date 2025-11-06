@@ -16,12 +16,13 @@ npm install @ua2/core @ua2/react @ua2/paymasters
 
 ```ts
 const ua = await UA2.connect({
-  preferred: ['argent','braavos','cartridge'],
+  preferred: ['argent', 'braavos', 'cartridge', 'injected'],
   fallback: true
 });
 ```
 
 Returns a `UA2Client` bound to chosen wallet provider.
+The SDK wraps `starknet.js` connectors and calls `enable()` on injected wallets (Argent X, Braavos, Cartridge, generic providers). Successful connections automatically populate `transport` and `ua2Address` on the client so subsequent calls can interact with the on-chain UA² account without additional wiring.
 
 ---
 
@@ -46,6 +47,8 @@ const sess = await ua.sessions.create({
 // `resolvePolicy` ensures validUntil > validAfter and normalizes Uint256 calldata.
 ```
 
+When both `transport` and `ua2Address` are available, `sessions.create` registers the policy on-chain by invoking the UA² contract's `add_session_with_allowlists` entrypoint in addition to caching it locally.
+
 ---
 
 ### sessions.revoke(sessionId)
@@ -53,6 +56,8 @@ const sess = await ua.sessions.create({
 ```ts
 await ua.sessions.revoke(sess.id);
 ```
+
+If the client has an active `transport` and `ua2Address`, the SDK issues a `revoke_session` transaction against the UA² contract so the session is removed on-chain before pruning it from local caches.
 
 ### sessions.use(sessionId)
 
@@ -83,16 +88,21 @@ const policy = UA2.sessions.guard({ maxCalls: 5, expiresInSeconds: 3600 })
 ```ts
 import { UA2 } from '@ua2/core';
 
-const pm = UA2.paymasters.noop(); // devnet/local defaults
+const pm = UA2.paymasters.from('avnu', {
+  url: 'https://sepolia.paymaster.avnu.fi',
+  apiKey: process.env.PAYMASTER_API_KEY,
+  defaultGasToken: process.env.GAS_TOKEN, // required for `mode: "default"`
+});
+
 const runner = ua.withPaymaster(pm, { transport, ua2Address: account.address });
 
 const tx = await runner.call(contract.address, contract.selector('doThing'), [arg1, arg2]);
 ```
 
-For Sepolia sponsorship via AVNU, request an adapter and call it directly when constructing your transaction batch:
+`UA2.paymasters.from('avnu')` returns the Avnu integration baked into the SDK. It exposes the same helper methods as `UA2.paymasters.avnu` but can be discovered via config strings alongside legacy adapters.
 
 ```ts
-const avnu = UA2.paymasters.avnu({
+const avnu = UA2.paymasters.from('avnu', {
   url: 'https://sepolia.paymaster.avnu.fi',
   apiKey: process.env.PAYMASTER_API_KEY,
   defaultGasToken: process.env.GAS_TOKEN, // required for `mode: "default"`
@@ -101,8 +111,6 @@ const avnu = UA2.paymasters.avnu({
 if (await avnu.isAvailable()) {
   const result = await avnu.sponsor(account, calls, 'sponsored');
   console.log('Sponsored hash', result.transaction_hash);
-} else {
-  console.warn('AVNU unavailable – fall back to UA2.paymasters.noop()');
 }
 ```
 
@@ -160,5 +168,6 @@ const avnu = UA2.paymasters.avnu({ url, apiKey, defaultGasToken });
 * `UA2Error: ProviderUnavailable`
 * `UA2Error: SessionExpired`
 * `UA2Error: PolicyViolation(selector|target|value|calls)`
+* `UA2Error: NOT_OWNER`
 * `UA2Error: PaymasterDenied`
-* `UA2.errors.mapContractError(error)` → helper that maps Cairo revert strings (`ERR_*`) to the classes above.
+* `UA2.errors.mapContractError(error)` → helper that maps Cairo revert strings (`ERR_*`) to the classes above, including `ERR_NOT_OWNER` → `UA2Error: NOT_OWNER`.

@@ -65,6 +65,7 @@ STARKNET_NETWORK=devnet
 UA2_CLASS_HASH=
 UA2_IMPLEMENTATION_ADDR=
 UA2_PROXY_ADDR=
+# UA2_USE_PROXY=1  # uncomment to deploy via the proxy
 
 # Demo app
 NEXT_PUBLIC_NETWORK=devnet
@@ -85,13 +86,14 @@ STARKNET_NETWORK=sepolia
 UA2_CLASS_HASH=
 UA2_IMPLEMENTATION_ADDR=
 UA2_PROXY_ADDR=
+# UA2_USE_PROXY=1  # uncomment to deploy via the proxy
 
 # Demo app
 NEXT_PUBLIC_NETWORK=sepolia
 NEXT_PUBLIC_UA2_PROXY_ADDR=
 ```
 
-> Fill RPC with your provider key. Leave the contract fields empty for now; update them after deployment.
+> Fill RPC with your provider key. Leave the contract fields empty for now; update them after deployment. Uncomment `UA2_USE_PROXY=1` when you want the deployment script to provision the proxy.
 
 ---
 
@@ -102,9 +104,13 @@ NEXT_PUBLIC_UA2_PROXY_ADDR=
 cd packages/contracts
 scarb build
 
+# Build includes ua2proxy.cairo; rebuild after proxy changes.
+
 # Run unit tests (Cairo)
 snforge test -vv
 ```
+
+`scarb build` compiles both the UA² account and `ua2proxy.cairo`; rerun it after changes to either contract.
 
 Expected tail:
 
@@ -238,9 +244,14 @@ ua2_account = "${UA2_PROXY_ADDR}"
 
 ## 6) Declare & deploy on Sepolia
 
-You can still use `./scripts/deploy_ua2.sh`, but when debugging or verifying
-interactively we recommend mirroring the devnet flow with `sncast` so the same
-commands work everywhere. Replace `<...>` placeholders before running.
+For the standard flow, deploy through the proxy using the helper script:
+
+```bash
+UA2_USE_PROXY=1 UA2_OWNER_PUBKEY=<OWNER_PUBKEY_FELT> \
+  packages/contracts/scripts/deploy_ua2.sh
+```
+
+The script deploys `ua2proxy.cairo`, sets the implementation class hash, and writes `UA2_PROXY_ADDR` alongside `UA2_IMPLEMENTATION_ADDR` (aliased to the proxy) into `.env*` and `packages/contracts/.ua2-sepolia-addresses.json`. When debugging or verifying interactively you can mirror the devnet flow below with `sncast`. Replace `<...>` placeholders before running.
 
 ```bash
 cd packages/contracts
@@ -287,12 +298,13 @@ and `UA2_PROXY_ADDR` into `.env.sepolia` so the SDK and demo app target the righ
 contracts. If `sncast` reports an estimated fee above the provided max, re-run the
 command with the suggested value.
 
-When you prefer automation, `./scripts/deploy_ua2.sh` is still available and writes the
-same values into `packages/contracts/.ua2-sepolia-addresses.json`.
+The scripted path with `UA2_USE_PROXY=1` writes the same values into `packages/contracts/.ua2-sepolia-addresses.json`.
 
 > [!NOTE]
 > If you open a new shell before the smoke tests below, re-export `RPC` and `NAME`
 > so `sncast` can find the correct endpoint and account.
+
+After a proxy deployment, point the front-end and SDK clients at `UA2_PROXY_ADDR`; the implementation address remains the proxy for external calls.
 
 ---
 

@@ -32,6 +32,13 @@ describe('mapContractError', () => {
     expect(mapped.message).toMatch(/not a registered guardian/i);
   });
 
+  it('maps bare NOT_OWNER revert codes', () => {
+    const mapped = mapContractError('Execution reverted: NOT_OWNER');
+    expect(mapped).toBeInstanceOf(UA2Error);
+    expect(mapped.code).toBe('NOT_OWNER');
+    expect(mapped.message).toMatch(/account owner/i);
+  });
+
   it('falls back to UnknownContractError when no code is present', () => {
     const mapped = mapContractError(new Error('something else')); // no ERR_* token
     expect(mapped).toBeInstanceOf(UA2Error);

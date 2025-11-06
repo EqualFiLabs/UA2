@@ -81,6 +81,8 @@ const CONTRACT_ERROR_FACTORIES: Record<string, ErrorFactory> = {
   ERR_ZERO_OWNER: basic('ERR_ZERO_OWNER', 'Owner cannot be the zero felt.'),
   ERR_SAME_OWNER: basic('ERR_SAME_OWNER', 'New owner must differ from the current owner.'),
   ERR_UNSUPPORTED_AUTH_MODE: basic('ERR_UNSUPPORTED_AUTH_MODE', 'Authentication mode combination is not supported.'),
+  // Some contracts emit codes without the ERR_ prefix. Map them explicitly.
+  NOT_OWNER: basic('NOT_OWNER', 'Caller is not the account owner.'),
 };
 
 /**
@@ -94,7 +96,8 @@ export function mapContractError(error: unknown): UA2Error {
   }
 
   const message = extractMessage(error);
-  const match = message.match(/ERR_[A-Z0-9_]+/);
+  // Match both ERR_* patterns and standalone codes like NOT_OWNER
+  const match = message.match(/(ERR_[A-Z0-9_]+|NOT_OWNER)/);
   if (match) {
     const code = match[0];
     const factory = CONTRACT_ERROR_FACTORIES[code];

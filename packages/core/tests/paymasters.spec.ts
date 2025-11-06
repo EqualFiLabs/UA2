@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { withPaymaster } from '../src/paymasterRunner';
-import { NoopPaymaster } from '../src/paymasters';
+import { NoopPaymaster, AvnuPaymaster } from '../src/paymasters';
 import { paymasterFrom } from '../src/paymastersFactory';
 import { PaymasterDeniedError } from '../src/errors';
 import type {
@@ -125,15 +125,22 @@ describe('paymasters', () => {
 
   it('paymaster factory returns adapters and errors for unknown ids', async () => {
     const noop = paymasterFrom('noop:test');
-    const sponsored = await noop.sponsor({ calls: [], maxFee: undefined });
+    expect(noop).toBeInstanceOf(NoopPaymaster);
+    const sponsored = await (noop as NoopPaymaster).sponsor({ calls: [], maxFee: undefined });
     expect(noop.name).toBe('noop:test');
     expect(sponsored.sponsorName).toBe('noop:test');
 
     const cartridge = paymasterFrom('cartridge');
+    expect(cartridge).toBeInstanceOf(NoopPaymaster);
     expect(cartridge.name).toBe('cartridge');
 
     const starknetReact = paymasterFrom('starknet-react:demo');
+    expect(starknetReact).toBeInstanceOf(NoopPaymaster);
     expect(starknetReact.name).toBe('starknet-react:demo');
+
+    const avnu = paymasterFrom('avnu');
+    expect(avnu).toBeInstanceOf(AvnuPaymaster);
+    expect(avnu.name).toBe('avnu');
 
     expect(() => paymasterFrom('unknown')).toThrow(PaymasterDeniedError);
   });

@@ -1,5 +1,5 @@
 import { PaymasterDeniedError } from './errors';
-import { NoopPaymaster } from './paymasters';
+import { NoopPaymaster, AvnuPaymaster } from './paymasters';
 import type { Paymaster } from './types';
 
 class CartridgePaymaster extends NoopPaymaster {
@@ -14,12 +14,14 @@ class StarknetReactPaymaster extends NoopPaymaster {
   }
 }
 
+type PaymasterAdapter = Paymaster | AvnuPaymaster;
+
 function normalizeId(id: string): [string, string | undefined] {
   const [base, ...rest] = id.split(':');
   return [base.toLowerCase(), rest.length > 0 ? rest.join(':') : undefined];
 }
 
-export function paymasterFrom(id: string): Paymaster {
+export function paymasterFrom(id: string): PaymasterAdapter {
   const trimmed = id.trim();
   if (!trimmed) {
     throw new PaymasterDeniedError('Paymaster id must be a non-empty string.');
@@ -34,6 +36,9 @@ export function paymasterFrom(id: string): Paymaster {
       return new CartridgePaymaster(tag);
     case 'starknet-react':
       return new StarknetReactPaymaster(tag);
+    case 'avnu':
+      // Instantiate the Avnu paymaster. Tags are unused for Avnu.
+      return new AvnuPaymaster();
     default:
       throw new PaymasterDeniedError(`Unknown paymaster adapter: ${id}`);
   }

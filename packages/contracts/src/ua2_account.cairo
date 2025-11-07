@@ -1,5 +1,6 @@
 use openzeppelin::account::AccountComponent;
 use openzeppelin::introspection::src5::SRC5Component;
+use openzeppelin::upgrades::UpgradeableComponent;
 
 #[starknet::contract(account)]
 #[feature("deprecated_legacy_map")]
@@ -13,11 +14,12 @@ pub mod UA2Account {
     use core::serde::Serde;
     use core::traits::{Into, TryInto};
     use openzeppelin::account::interface;
+    use openzeppelin::upgrades::interface::IUpgradeable;
     use starknet::account::Call;
     use starknet::storage::Map;
     use starknet::syscalls::call_contract_syscall;
     use starknet::{
-        ContractAddress, SyscallResultTrait, get_caller_address, get_contract_address,
+        ClassHash, ContractAddress, SyscallResultTrait, get_caller_address, get_contract_address,
         get_execution_info,
     };
     use crate::errors::{
@@ -32,10 +34,13 @@ pub mod UA2Account {
         ERR_UNSUPPORTED_AUTH_MODE, ERR_VALUE_LIMIT_EXCEEDED, ERR_ZERO_OWNER,
     };
     use crate::session::Session;
-    use super::{AccountComponent, SRC5Component};
+    use super::{AccountComponent, SRC5Component, UpgradeableComponent};
 
     component!(path: AccountComponent, storage: account, event: AccountEvent);
     component!(path: SRC5Component, storage: src5, event: SRC5Event);
+    component!(path: UpgradeableComponent, storage: upgradeable, event: UpgradeableEvent);
+
+    impl UpgradeableInternalImpl = UpgradeableComponent::InternalImpl<ContractState>;
 
     const ERC20_TRANSFER_SEL: felt252 =
         0x83afd3f4caedc6eebf44246fe54e38c95e3179a5ec9ea81740eca5b482d12e;
@@ -52,6 +57,8 @@ pub mod UA2Account {
         account: AccountComponent::Storage,
         #[substorage(v0)]
         src5: SRC5Component::Storage,
+        #[substorage(v0)]
+        upgradeable: UpgradeableComponent::Storage,
         owner_pubkey: felt252,
         session: Map<felt252, SessionPolicy>,
         session_nonce: Map<felt252, u128>,
@@ -196,6 +203,8 @@ pub mod UA2Account {
         RecoveryConfirmed: RecoveryConfirmed,
         RecoveryCanceled: RecoveryCanceled,
         RecoveryExecuted: RecoveryExecuted,
+        #[flat]
+        UpgradeableEvent: UpgradeableComponent::Event,
     }
 
     #[constructor]
@@ -203,6 +212,14 @@ pub mod UA2Account {
         self.owner_pubkey.write(public_key);
         self.session_owner_epoch.write(0_u64);
         self.account.initializer(public_key);
+    }
+
+    #[abi(embed_v0)]
+    impl UpgradeableImpl of IUpgradeable<ContractState> {
+        fn upgrade(ref self: ContractState, new_class_hash: ClassHash) {
+            self.account.assert_only_self();
+            self.upgradeable.upgrade(new_class_hash);
+        }
     }
 
     #[external(v0)]

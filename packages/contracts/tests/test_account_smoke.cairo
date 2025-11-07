@@ -1,6 +1,6 @@
 use core::array::SpanTrait;
 use core::result::ResultTrait;
-use snforge_std::{declare, ContractClassTrait, DeclareResultTrait};
+use snforge_std::{ContractClassTrait, DeclareResultTrait, declare};
 use starknet::SyscallResultTrait;
 
 const OWNER_PUBKEY: felt252 = 0x12345;
@@ -13,11 +13,9 @@ fn owner_getter_works() {
 
     let empty = array![];
     let result = starknet::syscalls::call_contract_syscall(
-        contract_address,
-        starknet::selector!("get_owner"),
-        empty.span(),
+        contract_address, starknet::selector!("get_owner"), empty.span(),
     )
-    .unwrap_syscall();
+        .unwrap_syscall();
     let owner = *result.at(0);
     assert(owner == OWNER_PUBKEY, 'owner mismatch');
 }

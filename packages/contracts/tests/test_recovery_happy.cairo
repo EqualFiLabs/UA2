@@ -2,31 +2,17 @@ use core::array::{ArrayTrait, SpanTrait};
 use core::result::ResultTrait;
 use core::traits::{Into, TryInto};
 use snforge_std::{
-    declare,
-    spy_events,
-    start_cheat_block_timestamp,
-    start_cheat_caller_address,
-    stop_cheat_block_timestamp,
+    ContractClassTrait, DeclareResultTrait, EventSpyAssertionsTrait, declare, spy_events,
+    start_cheat_block_timestamp, start_cheat_caller_address, stop_cheat_block_timestamp,
     stop_cheat_caller_address,
-    ContractClassTrait,
-    DeclareResultTrait,
-    EventSpyAssertionsTrait,
 };
-use starknet::{ContractAddress, SyscallResult, SyscallResultTrait};
 use starknet::syscalls::call_contract_syscall;
-use ua2_contracts::ua2_account::UA2Account::{
-    Event,
-    GuardianAdded,
-    GuardianFinalized,
-    GuardianProposed,
-    OwnerRotated,
-    RecoveryConfirmed,
-    RecoveryDelaySet,
-    RecoveryExecuted,
-    RecoveryProposed,
-    ThresholdSet,
-};
+use starknet::{ContractAddress, SyscallResult, SyscallResultTrait};
 use ua2_contracts::errors::ERR_NO_RECOVERY;
+use ua2_contracts::ua2_account::UA2Account::{
+    Event, GuardianAdded, GuardianFinalized, GuardianProposed, OwnerRotated, RecoveryConfirmed,
+    RecoveryDelaySet, RecoveryExecuted, RecoveryProposed, ThresholdSet,
+};
 
 const OWNER_PUBKEY: felt252 = 0x12345;
 const NEW_OWNER: felt252 = 0xABCDEF0123;
@@ -39,9 +25,7 @@ fn deploy_account() -> ContractAddress {
 }
 
 fn call_with_address(
-    contract_address: ContractAddress,
-    selector: felt252,
-    addr: ContractAddress,
+    contract_address: ContractAddress, selector: felt252, addr: ContractAddress,
 ) -> SyscallResult<Span<felt252>> {
     let mut calldata = array![];
     calldata.append(addr.into());
@@ -49,9 +33,7 @@ fn call_with_address(
 }
 
 fn call_with_felt(
-    contract_address: ContractAddress,
-    selector: felt252,
-    value: felt252,
+    contract_address: ContractAddress, selector: felt252, value: felt252,
 ) -> SyscallResult<Span<felt252>> {
     let mut calldata = array![];
     calldata.append(value);
@@ -60,9 +42,7 @@ fn call_with_felt(
 
 fn assert_reverted_with(result: SyscallResult<Span<felt252>>, expected: felt252) {
     match result {
-        Result::Ok(_) => {
-            assert(false, 'expected revert');
-        },
+        Result::Ok(_) => { assert(false, 'expected revert'); },
         Result::Err(panic_data) => {
             let data = panic_data.span();
             assert(data.len() > 0_usize, 'missing panic data');
@@ -112,98 +92,69 @@ fn recovery_happy_path() {
 
     let empty_owner = array![];
     let owner_result = call_contract_syscall(
-        contract_address,
-        starknet::selector!("get_owner"),
-        empty_owner.span(),
+        contract_address, starknet::selector!("get_owner"), empty_owner.span(),
     )
-    .unwrap_syscall();
+        .unwrap_syscall();
     let owner = *owner_result.at(0_usize);
     assert(owner == NEW_OWNER, 'owner not rotated');
 
     start_cheat_caller_address(contract_address, g1);
     let empty = array![];
     let second_execute = call_contract_syscall(
-        contract_address,
-        starknet::selector!("execute_recovery"),
-        empty.span(),
+        contract_address, starknet::selector!("execute_recovery"), empty.span(),
     );
     stop_cheat_caller_address(contract_address);
     assert_reverted_with(second_execute, ERR_NO_RECOVERY);
 
     stop_cheat_block_timestamp(contract_address);
 
-    spy.assert_emitted(@array![
-        (
-            contract_address,
-            Event::GuardianAdded(GuardianAdded { addr: g1 }),
-        ),
-        (
-            contract_address,
-            Event::GuardianAdded(GuardianAdded { addr: g2 }),
-        ),
-        (
-            contract_address,
-            Event::GuardianAdded(GuardianAdded { addr: g3 }),
-        ),
-        (
-            contract_address,
-            Event::ThresholdSet(ThresholdSet { threshold: 2_u8 }),
-        ),
-        (
-            contract_address,
-            Event::RecoveryDelaySet(RecoveryDelaySet { delay: 0_u64 }),
-        ),
-        (
-            contract_address,
-            Event::RecoveryConfirmed(RecoveryConfirmed {
-                guardian: g1,
-                new_owner: NEW_OWNER,
-                count: 1_u32,
-            }),
-        ),
-        (
-            contract_address,
-            Event::GuardianProposed(GuardianProposed {
-                guardian: g1,
-                proposal_id: 1_u64,
-                new_owner: NEW_OWNER,
-                eta: 100_u64,
-            }),
-        ),
-        (
-            contract_address,
-            Event::RecoveryProposed(RecoveryProposed {
-                new_owner: NEW_OWNER,
-                eta: 100_u64,
-            }),
-        ),
-        (
-            contract_address,
-            Event::RecoveryConfirmed(RecoveryConfirmed {
-                guardian: g2,
-                new_owner: NEW_OWNER,
-                count: 2_u32,
-            }),
-        ),
-        (
-            contract_address,
-            Event::OwnerRotated(OwnerRotated {
-                new_owner: NEW_OWNER,
-            }),
-        ),
-        (
-            contract_address,
-            Event::RecoveryExecuted(RecoveryExecuted {
-                new_owner: NEW_OWNER,
-            }),
-        ),
-        (
-            contract_address,
-            Event::GuardianFinalized(GuardianFinalized {
-                guardian: g1,
-                proposal_id: 1_u64,
-                new_owner: NEW_OWNER,
-            }),
-        ),
-    ]);
+    spy
+        .assert_emitted(
+            @array![
+                (contract_address, Event::GuardianAdded(GuardianAdded { addr: g1 })),
+                (contract_address, Event::GuardianAdded(GuardianAdded { addr: g2 })),
+                (contract_address, Event::GuardianAdded(GuardianAdded { addr: g3 })),
+                (contract_address, Event::ThresholdSet(ThresholdSet { threshold: 2_u8 })),
+                (contract_address, Event::RecoveryDelaySet(RecoveryDelaySet { delay: 0_u64 })),
+                (
+                    contract_address,
+                    Event::RecoveryConfirmed(
+                        RecoveryConfirmed { guardian: g1, new_owner: NEW_OWNER, count: 1_u32 },
+                    ),
+                ),
+                (
+                    contract_address,
+                    Event::GuardianProposed(
+                        GuardianProposed {
+                            guardian: g1, proposal_id: 1_u64, new_owner: NEW_OWNER, eta: 100_u64,
+                        },
+                    ),
+                ),
+                (
+                    contract_address,
+                    Event::RecoveryProposed(
+                        RecoveryProposed { new_owner: NEW_OWNER, eta: 100_u64 },
+                    ),
+                ),
+                (
+                    contract_address,
+                    Event::RecoveryConfirmed(
+                        RecoveryConfirmed { guardian: g2, new_owner: NEW_OWNER, count: 2_u32 },
+                    ),
+                ),
+                (contract_address, Event::OwnerRotated(OwnerRotated { new_owner: NEW_OWNER })),
+                (
+                    contract_address,
+                    Event::RecoveryExecuted(RecoveryExecuted { new_owner: NEW_OWNER }),
+                ),
+                (
+                    contract_address,
+                    Event::GuardianFinalized(
+                        GuardianFinalized {
+                            guardian: g1, proposal_id: 1_u64, new_owner: NEW_OWNER,
+                        },
+                    ),
+                ),
+            ],
+        );
 }

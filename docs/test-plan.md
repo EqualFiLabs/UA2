@@ -200,7 +200,7 @@ Script: `packages/example/scripts/e2e-sepolia.ts`
 
 **Flow:**
 
-1. Attach UA² at `$UA2_PROXY_ADDR`.
+1. Attach UA² at `$UA2_ACCOUNT_ADDR`.
 2. Create session with narrow policy.
 3. Execute in-policy call (e.g., post a note or small ERC-20 transfer).
 4. Revoke session; see call fail.
@@ -263,7 +263,7 @@ Artifacts:
 
 * All unit and e2e tests pass on devnet locally.
 * Sepolia e2e succeeds at least once (attach → create session → in-policy call → revoke).
-* Docs updated with actual class hash and proxy addresses.
+* Docs updated with actual class hash and account addresses.
 * Demo script rehearsed end-to-end in < 7 minutes.
 
 ```

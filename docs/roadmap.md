@@ -16,7 +16,7 @@ Status: Draft (Resolve Hackathon)
 - Expand test coverage with fuzz + property tests.
 - Add default policy templates (ERC-20 only, NFT only).
 - SDK: error typing and improved dev ergonomics.
-- Proxy deployment via `ua2proxy.cairo` with runbook + env flag support.
+- Native upgrade runbook + scripts around `upgrade(new_class_hash)` (no proxy).
 - Avnu paymaster integration for Sepolia sponsorship.
 
 ---

@@ -73,6 +73,6 @@
 
 ---
 
-## Proxy Pattern and Upgradeability
+## Upgradeability
 
-UA² ships with a UUPS-style proxy (`ua2proxy.cairo`) that holds the implementation class hash and proxy admin address in storage. The proxy forwards external calls to the current implementation via `delegate_call`, preserving the caller context while reusing the account storage. Deployments performed with `UA2_USE_PROXY=1` provision the proxy contract, point it at the UA² implementation, and allow controlled upgrades by invoking the `upgrade` entrypoint from the admin account.
+UA² leans on Starknet’s native upgrade flow instead of an EVM-style proxy. The account contract mixes in OpenZeppelin’s `UpgradeableComponent`, exposing an owner-only `upgrade(new_class_hash)` entrypoint that wraps the `replace_class` syscall. Deployments now track a single `UA2_ACCOUNT_ADDR`; upgrading declares the new class hash, then calls `upgrade` so the account swaps its code while preserving storage.

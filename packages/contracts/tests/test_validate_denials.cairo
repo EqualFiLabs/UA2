@@ -14,7 +14,8 @@ use starknet::syscalls::call_contract_syscall;
 use starknet::{ContractAddress, SyscallResult, SyscallResultTrait};
 use ua2_contracts::errors::{
     ERR_POLICY_CALLCAP, ERR_POLICY_SELECTOR_DENIED, ERR_POLICY_TARGET_DENIED, ERR_SESSION_EXPIRED,
-    ERR_SESSION_NOT_READY, ERR_SESSION_SELECTORS_LEN, ERR_SESSION_TARGETS_LEN, ERR_VALUE_LIMIT_EXCEEDED,
+    ERR_SESSION_NOT_READY, ERR_SESSION_SELECTORS_LEN, ERR_SESSION_TARGETS_LEN,
+    ERR_VALUE_LIMIT_EXCEEDED,
 };
 use ua2_contracts::session::Session;
 use ua2_contracts::ua2_account::UA2Account::SessionPolicy;
@@ -105,10 +106,7 @@ fn build_transfer_call(mock_address: ContractAddress, to: ContractAddress, amoun
 }
 
 fn build_transfer_from_call(
-    mock_address: ContractAddress,
-    from: ContractAddress,
-    to: ContractAddress,
-    amount: u256,
+    mock_address: ContractAddress, from: ContractAddress, to: ContractAddress, amount: u256,
 ) -> Call {
     let mut calldata = array![];
     calldata.append(from.into());
@@ -338,11 +336,7 @@ fn empty_allowlists_reject_calls() {
     let calls = array![call];
 
     let result = execute_session_calls(
-        account_address,
-        @calls,
-        0_u128,
-        session_pubkey,
-        policy.valid_until,
+        account_address, @calls, 0_u128, session_pubkey, policy.valid_until,
     );
 
     assert_reverted_with(result, ERR_POLICY_TARGET_DENIED);
@@ -414,11 +408,7 @@ fn denies_session_not_ready() {
     let calls = array![call];
 
     let result = execute_session_calls(
-        account_address,
-        @calls,
-        0_u128,
-        session_pubkey,
-        policy.valid_until,
+        account_address, @calls, 0_u128, session_pubkey, policy.valid_until,
     );
 
     assert_reverted_with(result, ERR_SESSION_NOT_READY);
@@ -528,11 +518,7 @@ fn denies_transfer_from_over_value_cap() {
     let calls = array![call];
 
     let result = execute_session_calls(
-        account_address,
-        @calls,
-        0_u128,
-        session_pubkey,
-        policy.valid_until,
+        account_address, @calls, 0_u128, session_pubkey, policy.valid_until,
     );
 
     assert_reverted_with(result, ERR_VALUE_LIMIT_EXCEEDED);

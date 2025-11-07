@@ -197,7 +197,7 @@ event RecoveryExecuted(new_owner: felt252);
 
 ### 8.5 Upgradeability
 
-* Ship as **proxy + implementation** using OZ Cairo proxy pattern to allow module upgrades (future-proof). ([openzeppelin.com][8])
+* Ship as a **native upgradeable account** using OZ’s `UpgradeableComponent` + `replace_class` to keep one address while allowing code upgrades. ([openzeppelin.com][8])
 
 ---
 
@@ -403,7 +403,7 @@ event RecoveryExecuted(new_owner: felt252);
 **Day 3:** Implement `SessionKeys` policy checks (selectors/targets/expiry/callcap).
 **Day 4:** Implement value cap + `calls_used` accounting; unit tests (happy/negative).
 **Day 5:** Guardians module + recovery timelock; tests.
-**Day 6:** KeyRotation; pausable; proxy wiring; deploy script (Sepolia). ([openzeppelin.com][8])
+**Day 6:** KeyRotation; pausable; upgrade wiring (native `upgrade(new_class_hash)`); deploy script (Sepolia). ([openzeppelin.com][8])
 **Day 7:** TS `@ua2/core`: wallet abstraction on **starknet.js**; connect, sign, call. ([starknetjs.com][3])
 **Day 8:** Sessions API (create/list/revoke/use); local key mgmt; domain sep.
 **Day 9:** Paymaster interface + 1 adapter following **starknet.js paymaster guide**; e2e devnet. ([starknetjs.com][5])

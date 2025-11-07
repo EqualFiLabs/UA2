@@ -32,10 +32,7 @@ fn build_transfer_call(mock_address: ContractAddress, to: ContractAddress, amoun
 }
 
 fn build_transfer_from_call(
-    mock_address: ContractAddress,
-    from: ContractAddress,
-    to: ContractAddress,
-    amount: u256,
+    mock_address: ContractAddress, from: ContractAddress, to: ContractAddress, amount: u256,
 ) -> Call {
     let mut calldata = array![];
     calldata.append(from.into());
@@ -253,20 +250,14 @@ fn session_allows_transfer_from_calls() {
     let zero_contract: ContractAddress = 0.try_into().unwrap();
     start_cheat_caller_address(account_address, zero_contract);
     let signature: Array<felt252> = build_session_signature(
-        account_address,
-        session_pubkey,
-        0_u128,
-        policy.valid_until,
-        @calls,
+        account_address, session_pubkey, 0_u128, policy.valid_until, @calls,
     );
     start_cheat_signature(account_address, signature.span());
 
     let mut execute_calldata = array![];
     Serde::<Array<Call>>::serialize(@calls, ref execute_calldata);
     call_contract_syscall(
-        account_address,
-        starknet::selector!("__execute__"),
-        execute_calldata.span(),
+        account_address, starknet::selector!("__execute__"), execute_calldata.span(),
     )
         .unwrap_syscall();
 
@@ -274,9 +265,7 @@ fn session_allows_transfer_from_calls() {
     stop_cheat_caller_address(account_address);
 
     let get_last_result = call_contract_syscall(
-        mock_address,
-        starknet::selector!("get_last"),
-        array![].span(),
+        mock_address, starknet::selector!("get_last"), array![].span(),
     )
         .unwrap_syscall();
 

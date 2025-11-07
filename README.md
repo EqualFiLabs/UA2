@@ -91,11 +91,11 @@ sncast --account "$NAME" \
   --url "$RPC" \
   --max-fee 9638049920000000000
 
-UA2_PROXY_ADDR=0xDEPLOYED_ADDRESS
+UA2_ACCOUNT_ADDR=0xDEPLOYED_ADDRESS
 
 sncast --account "$NAME" \
   call \
-  --contract-address "$UA2_PROXY_ADDR" \
+  --contract-address "$UA2_ACCOUNT_ADDR" \
   --function get_owner \
   --url "$RPC"
 
@@ -106,9 +106,9 @@ NAME=sepolia
 
 If `sncast` reports "fee too low", rerun the declare/deploy with the suggested higher
 `--max-fee` (fees are denominated in **FRI (STRK)**). Copy the resulting class hash,
-implementation hash, and proxy address into `.env` / `.env.sepolia` so the SDK and demo app
-point at the correct contracts. `./scripts/deploy_ua2.sh` is still available when you want an
-automated run.
+implementation hash, and account address into `.env` / `.env.sepolia` so the SDK and demo app
+point at the correct contracts. `./scripts/deploy_ua2.sh` automates the declare/deploy flow for
+the native upgradeable contract.
 
 > [!NOTE]
 > On devnet, mint FRI to the printed account address via `devnet_mint`. On Sepolia,

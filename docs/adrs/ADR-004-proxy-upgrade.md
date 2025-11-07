@@ -1,16 +1,15 @@
-# ADR-004: Proxy Pattern for Upgradeability
+# ADR-004: Native Upgradeability (replace_class)
 
 ## Context
 UA² Account may evolve post-hackathon. Cairo contracts require upgrade paths.
 
 ## Decision
-Deploy via **OpenZeppelin UUPS-style proxy** with separate admin.  
-`ua2proxy.cairo` in the repository implements the UUPS dispatcher: it stores the implementation class hash and admin, delegates calls, and exposes an `upgrade` entrypoint guarded by the admin.
+Adopt Starknet’s native upgrade flow: mix OpenZeppelin’s `UpgradeableComponent` into `UA2Account`, gate `upgrade(new_class_hash)` with the account’s owner, and rely on the `replace_class` syscall to swap code in-place (no proxy contract).
 
 ## Alternatives
 - Immutable implementation: safer, but un-upgradeable.  
-- Custom minimal proxy: less tooling support.
+- Custom proxy contracts: emulate delegatecalls with manual forwarders, but no Starknet fallback means high maintenance cost and duplicated entrypoints.
 
 ## Consequences
-- Pros: Flexibility; shipping upgrades only requires declaring a new implementation and calling `upgrade`.  
-- Cons: Introduces an admin trust assumption for the proxy; mitigated by separation of roles and monitoring of upgrade events.
+- Pros: Single contract address forever; governance upgrades declare a new class hash and call `upgrade`, preserving storage without extra admin contracts.  
+- Cons: Same upgrade-caveats as EVM (layout compatibility, access control) and requires tooling/scripts that keep `UA2_ACCOUNT_ADDR` + class hashes in sync.

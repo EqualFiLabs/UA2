@@ -1,33 +1,32 @@
 mod test_account_smoke;
-mod test_sessions;
-mod test_validate_allowlists;
-mod test_validate_denials;
+mod test_guardians_admin;
+mod test_owner_rotate;
+mod test_recovery_edgecases;
+mod test_recovery_happy;
+mod test_rotate_vs_recovery;
 mod test_session_nonce_ok;
 mod test_session_nonce_replay_and_mismatch;
-mod test_guardians_admin;
-mod test_recovery_happy;
-mod test_recovery_edgecases;
-mod test_owner_rotate;
-mod test_rotate_vs_recovery;
+mod test_sessions;
+mod test_upgradeable;
+mod test_validate_allowlists;
 mod test_validate_auth;
+mod test_validate_denials;
 
 pub mod session_test_utils {
     use core::array::{Array, ArrayTrait};
+    use core::pedersen::pedersen;
+    use core::poseidon::poseidon_hash_span;
     use core::result::Result;
     use core::traits::Into;
-    use starknet::account::Call;
-    use core::poseidon::poseidon_hash_span;
-    use starknet::{ContractAddress, get_execution_info};
     use snforge_std::signature::KeyPair;
-    use snforge_std::signature::stark_curve::{
-        StarkCurveKeyPairImpl,
-        StarkCurveSignerImpl,
-    };
-    use core::pedersen::pedersen;
+    use snforge_std::signature::stark_curve::{StarkCurveKeyPairImpl, StarkCurveSignerImpl};
+    use starknet::account::Call;
+    use starknet::{ContractAddress, get_execution_info};
 
     const SESSION_DOMAIN_TAG: felt252 = 0x5541325f53455353494f4e5f5631;
     const MODE_SESSION: felt252 = 1;
-    const SESSION_PRIVATE_KEY: felt252 = 0x123456789ABCDEFFEDCBA987654321123456789ABCDEFFEDCBA987654321;
+    const SESSION_PRIVATE_KEY: felt252 =
+        0x123456789ABCDEFFEDCBA987654321123456789ABCDEFFEDCBA987654321;
 
     fn poseidon_chain(acc: felt252, value: felt252) -> felt252 {
         let mut values = array![acc, value];
@@ -84,14 +83,8 @@ pub mod session_test_utils {
         let call_digest = hash_calls(calls);
 
         let mut values = array![
-            SESSION_DOMAIN_TAG,
-            chain_id,
-            account_felt,
-            session_pubkey,
-            key_hash,
-            call_digest,
-            valid_until.into(),
-            nonce.into(),
+            SESSION_DOMAIN_TAG, chain_id, account_felt, session_pubkey, key_hash, call_digest,
+            valid_until.into(), nonce.into(),
         ];
         poseidon_hash_span(values.span())
     }
@@ -116,7 +109,9 @@ pub mod session_test_utils {
         calls: @Array<Call>,
     ) -> Array<felt252> {
         let key_hash = pedersen(session_pubkey, 0);
-        let message = compute_message(account_address, session_pubkey, key_hash, nonce, valid_until, calls);
+        let message = compute_message(
+            account_address, session_pubkey, key_hash, nonce, valid_until, calls,
+        );
         let key_pair = session_keypair();
         let signature = StarkCurveSignerImpl::sign(key_pair, message);
         let (r, s) = match signature {

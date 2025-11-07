@@ -63,13 +63,11 @@ STARKNET_NETWORK=devnet
 
 # UA² contracts (fill after local deploys)
 UA2_CLASS_HASH=
-UA2_IMPLEMENTATION_ADDR=
-UA2_PROXY_ADDR=
-# UA2_USE_PROXY=1  # uncomment to deploy via the proxy
+UA2_ACCOUNT_ADDR=
 
 # Demo app
 NEXT_PUBLIC_NETWORK=devnet
-NEXT_PUBLIC_UA2_PROXY_ADDR=
+NEXT_PUBLIC_UA2_ACCOUNT_ADDR=
 ```
 
 **`./.env.sepolia`** (testnet)
@@ -84,16 +82,14 @@ STARKNET_NETWORK=sepolia
 
 # UA² contracts (populated after deploy)
 UA2_CLASS_HASH=
-UA2_IMPLEMENTATION_ADDR=
-UA2_PROXY_ADDR=
-# UA2_USE_PROXY=1  # uncomment to deploy via the proxy
+UA2_ACCOUNT_ADDR=
 
 # Demo app
 NEXT_PUBLIC_NETWORK=sepolia
-NEXT_PUBLIC_UA2_PROXY_ADDR=
+NEXT_PUBLIC_UA2_ACCOUNT_ADDR=
 ```
 
-> Fill RPC with your provider key. Leave the contract fields empty for now; update them after deployment. Uncomment `UA2_USE_PROXY=1` when you want the deployment script to provision the proxy.
+> Fill RPC with your provider key. Leave the contract fields empty for now; update them after deployment.
 
 ---
 
@@ -104,13 +100,11 @@ NEXT_PUBLIC_UA2_PROXY_ADDR=
 cd packages/contracts
 scarb build
 
-# Build includes ua2proxy.cairo; rebuild after proxy changes.
-
 # Run unit tests (Cairo)
 snforge test -vv
 ```
 
-`scarb build` compiles both the UA² account and `ua2proxy.cairo`; rerun it after changes to either contract.
+`scarb build` compiles the UA² account (which now bundles OZ’s `UpgradeableComponent`); rerun it after any Cairo source change.
 
 Expected tail:
 
@@ -185,7 +179,7 @@ sncast --account "$NAME" \
   --url "$RPC" \
   --max-fee 9638049920000000000
 
-# capture the proxy address for the next step
+# capture the account address for the next step
 UA2_ADDR=0xPASTE_DEPLOYED_ADDRESS
 
 # 7. Smoke test – zero-arg view, so no --calldata flag required
@@ -235,7 +229,7 @@ keystore = "~/.starknet_accounts/sepolia/keystore.json"
 
 ```toml
 [sepolia]
-ua2_account = "${UA2_PROXY_ADDR}"
+ua2_account = "${UA2_ACCOUNT_ADDR}"
 ```
 
 > You can also use `sncast --profile sepolia ...` with `--ledger` or `--keystore` flags if you prefer. The important part is pointing to a funded **Sepolia** account.
@@ -244,14 +238,14 @@ ua2_account = "${UA2_PROXY_ADDR}"
 
 ## 6) Declare & deploy on Sepolia
 
-For the standard flow, deploy through the proxy using the helper script:
+For the standard flow, run the helper script so it declares UA² (if needed) and deploys the single upgradeable account:
 
 ```bash
-UA2_USE_PROXY=1 UA2_OWNER_PUBKEY=<OWNER_PUBKEY_FELT> \
+UA2_OWNER_PUBKEY=<OWNER_PUBKEY_FELT> \
   packages/contracts/scripts/deploy_ua2.sh
 ```
 
-The script deploys `ua2proxy.cairo`, sets the implementation class hash, and writes `UA2_PROXY_ADDR` alongside `UA2_IMPLEMENTATION_ADDR` (aliased to the proxy) into `.env*` and `packages/contracts/.ua2-sepolia-addresses.json`. When debugging or verifying interactively you can mirror the devnet flow below with `sncast`. Replace `<...>` placeholders before running.
+The script records `UA2_CLASS_HASH` and `UA2_ACCOUNT_ADDR` inside `.env*` and `packages/contracts/.ua2-sepolia-addresses.json`. When debugging or verifying interactively you can mirror the devnet flow below with `sncast`. Replace `<...>` placeholders before running.
 
 ```bash
 cd packages/contracts
@@ -273,7 +267,7 @@ sncast --account "$NAME" \
 
 UA2_CLASS_HASH=0xCLASS_HASH_FROM_OUTPUT
 
-# 3. Deploy the class to get a live proxy
+# 3. Deploy the class to get a live account
 OWNER_PUBKEY=0xYOUR_OWNER_FELT
 sncast --account "$NAME" \
   deploy \
@@ -282,29 +276,26 @@ sncast --account "$NAME" \
   --url "$RPC" \
   --max-fee 9638049920000000000
 
-UA2_PROXY_ADDR=0xDEPLOYED_ADDRESS
+UA2_ACCOUNT_ADDR=0xDEPLOYED_ADDRESS
 
 # 4. Verify with a read-only call (no calldata flag for zero-arg functions)
 #    Leave `--calldata` off entirely when the selector takes no arguments.
 sncast --account "$NAME" \
   call \
-  --contract-address "$UA2_PROXY_ADDR" \
+  --contract-address "$UA2_ACCOUNT_ADDR" \
   --function get_owner \
   --url "$RPC"
 ```
 
-Copy the resulting `UA2_CLASS_HASH`, implementation address (from the deploy receipt),
-and `UA2_PROXY_ADDR` into `.env.sepolia` so the SDK and demo app target the right
-contracts. If `sncast` reports an estimated fee above the provided max, re-run the
-command with the suggested value.
+Copy the resulting `UA2_CLASS_HASH` and `UA2_ACCOUNT_ADDR` into `.env.sepolia` so the SDK and demo app target the right contract. If `sncast` reports an estimated fee above the provided max, re-run the command with the suggested value.
 
-The scripted path with `UA2_USE_PROXY=1` writes the same values into `packages/contracts/.ua2-sepolia-addresses.json`.
+The helper script writes the same values into `packages/contracts/.ua2-sepolia-addresses.json`.
 
 > [!NOTE]
 > If you open a new shell before the smoke tests below, re-export `RPC` and `NAME`
 > so `sncast` can find the correct endpoint and account.
 
-After a proxy deployment, point the front-end and SDK clients at `UA2_PROXY_ADDR`; the implementation address remains the proxy for external calls.
+After deployment, point the front-end and SDK clients at `UA2_ACCOUNT_ADDR`; upgrades reuse the same address by swapping the class hash in-place.
 
 ---
 
@@ -314,7 +305,7 @@ After a proxy deployment, point the front-end and SDK clients at `UA2_PROXY_ADDR
 # Read owner
 sncast --account sepolia \
   call \
-  --contract-address "$UA2_PROXY_ADDR" \
+  --contract-address "$UA2_ACCOUNT_ADDR" \
   --function get_owner \
   --url "$RPC"
 ```
@@ -331,7 +322,7 @@ Add a dummy session key (owner-signed tx):
 # Example: add session with 8h expiry, 50 max calls, single target, two selectors
 sncast --account sepolia \
   invoke \
-  --contract-address "$UA2_PROXY_ADDR" \
+  --contract-address "$UA2_ACCOUNT_ADDR" \
   --function add_session_with_allowlists \
   --calldata \
     <SESSION_PUBKEY_FELT> \
@@ -366,7 +357,7 @@ AVNU exposes a Starknet paymaster RPC that supports sponsored (gasless) and toke
    export $(grep -v '^#' .env.sepolia | xargs)
    ```
 
-2. Fill in `STARKNET_RPC_URL`, `UA2_ADDR`, and the paymaster fields:
+2. Fill in `STARKNET_RPC_URL`, `UA2_ACCOUNT_ADDR`, and the paymaster fields:
 
    ```env
    PAYMASTER_URL=https://sepolia.paymaster.avnu.fi
@@ -415,7 +406,7 @@ npm run dev
 * In the app:
 
   1. Connect wallet (Argent/Braavos)
-  2. Attach the UA² proxy address (reads owner/public state)
+  2. Attach the UA² account address (reads owner/public state)
   3. Create a session with a narrow policy
   4. Trigger an in-policy call (should pass without owner popup)
   5. Toggle “Use Paymaster” (if configured) and repeat

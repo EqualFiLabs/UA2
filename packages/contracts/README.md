@@ -76,25 +76,19 @@ source ./scripts/.env.sepolia
 # Outputs UA2_CLASS_HASH and stores it in .ua2-sepolia-addresses.json
 ```
 
-### 2) Deploy UA² (direct by default)
+### 2) Deploy UA² (native upgradeable)
 
 ```bash
 ./scripts/deploy_ua2.sh
-# Writes UA2_PROXY_ADDR (the deployed contract addr) into .ua2-sepolia-addresses.json
+# Writes UA2_ACCOUNT_ADDR (the deployed contract addr) into .ua2-sepolia-addresses.json
 ```
 
-### 3) (Optional) Proxy/UUPS path
-
-If/when `UA2Account` implements UUPS, set:
-
-```
-UA2_USE_PROXY=1
-```
-
-in `.env.sepolia` and adapt `upgrade_ua2.sh` with your upgrade entrypoint. Then:
+### 3) Upgrade an existing deployment
 
 ```bash
+# After declaring the new class hash, export UA2_CLASS_HASH=<NEW_HASH>
 ./scripts/upgrade_ua2.sh
+# Signs an owner-only transaction that calls `upgrade(new_hash)` on the deployed account
 ```
 
 ### Outputs
@@ -104,8 +98,7 @@ in `.env.sepolia` and adapt `upgrade_ua2.sh` with your upgrade entrypoint. Then:
   ```json
   {
     "UA2_CLASS_HASH": "0x...",
-    "UA2_PROXY_ADDR": "0x...",
-    "UA2_IMPLEMENTATION_ADDR": "0x..."
+    "UA2_ACCOUNT_ADDR": "0x..."
   }
   ```
 

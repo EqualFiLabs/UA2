@@ -42,9 +42,9 @@ async function main(): Promise<void> {
   const toolkit = await setupToolkit('devnet');
 
   const envAddress = optionalEnv([
-    'UA2_DEVNET_PROXY_ADDR',
+    'UA2_DEVNET_ACCOUNT_ADDR',
     'UA2_DEVNET_ADDR',
-    'UA2_PROXY_ADDR',
+    'UA2_ACCOUNT_ADDR',
     'UA2_ADDR',
   ]);
 

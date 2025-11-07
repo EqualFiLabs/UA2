@@ -2,25 +2,13 @@ use core::array::{Array, ArrayTrait, SpanTrait};
 use core::result::ResultTrait;
 use core::serde::Serde;
 use core::traits::{Into, TryInto};
-use snforge_std::{
-    cheat_caller_address,
-    declare,
-    spy_events,
-    start_cheat_caller_address,
-    start_cheat_signature,
-    start_cheat_transaction_hash,
-    stop_cheat_caller_address,
-    stop_cheat_signature,
-    stop_cheat_transaction_hash,
-    CheatSpan,
-    ContractClassTrait,
-    DeclareResultTrait,
-    EventSpyAssertionsTrait,
-};
 use snforge_std::signature::KeyPair;
-use snforge_std::signature::stark_curve::{
-    StarkCurveKeyPairImpl,
-    StarkCurveSignerImpl,
+use snforge_std::signature::stark_curve::{StarkCurveKeyPairImpl, StarkCurveSignerImpl};
+use snforge_std::{
+    CheatSpan, ContractClassTrait, DeclareResultTrait, EventSpyAssertionsTrait,
+    cheat_caller_address, declare, spy_events, start_cheat_caller_address, start_cheat_signature,
+    start_cheat_transaction_hash, stop_cheat_caller_address, stop_cheat_signature,
+    stop_cheat_transaction_hash,
 };
 use starknet::account::Call;
 use starknet::syscalls::call_contract_syscall;
@@ -86,22 +74,20 @@ fn owner_auth_allows_owner_call() {
     let mut execute_calldata = array![];
     Serde::<Array<Call>>::serialize(@calls, ref execute_calldata);
     call_contract_syscall(
-        account_address,
-        starknet::selector!("__execute__"),
-        execute_calldata.span(),
+        account_address, starknet::selector!("__execute__"), execute_calldata.span(),
     )
-    .unwrap_syscall();
+        .unwrap_syscall();
 
     stop_cheat_caller_address(account_address);
     stop_cheat_signature(account_address);
     stop_cheat_transaction_hash(account_address);
 
-    spy.assert_emitted(@array![
-        (
-            account_address,
-            UA2Account::Event::RecoveryDelaySet(RecoveryDelaySet { delay }),
-        ),
-    ]);
+    spy
+        .assert_emitted(
+            @array![
+                (account_address, UA2Account::Event::RecoveryDelaySet(RecoveryDelaySet { delay })),
+            ],
+        );
 }
 
 #[test]
@@ -116,11 +102,9 @@ fn guardian_mode_restricted_to_recovery_calls() {
     let mut guardian_calldata = array![];
     guardian_calldata.append(guardian.into());
     call_contract_syscall(
-        account_address,
-        starknet::selector!("add_guardian"),
-        guardian_calldata.span(),
+        account_address, starknet::selector!("add_guardian"), guardian_calldata.span(),
     )
-    .unwrap_syscall();
+        .unwrap_syscall();
     stop_cheat_caller_address(account_address);
 
     let mut guardian_signature = array![MODE_GUARDIAN, guardian.into()];
@@ -138,18 +122,14 @@ fn guardian_mode_restricted_to_recovery_calls() {
     let mut execute_calldata = array![];
     Serde::<Array<Call>>::serialize(@execute_calls, ref execute_calldata);
     let execute_result = call_contract_syscall(
-        account_address,
-        starknet::selector!("__execute__"),
-        execute_calldata.span(),
+        account_address, starknet::selector!("__execute__"), execute_calldata.span(),
     );
 
     stop_cheat_signature(account_address);
     stop_cheat_caller_address(account_address);
 
     match execute_result {
-        core::result::Result::Ok(_) => {
-            assert(false, 'expected revert');
-        },
+        core::result::Result::Ok(_) => { assert(false, 'expected revert'); },
         core::result::Result::Err(panic_data) => {
             let data = panic_data.span();
             assert(data.len() > 0_usize, 'missing panic data');
@@ -172,18 +152,14 @@ fn guardian_mode_restricted_to_recovery_calls() {
     let mut threshold_payload = array![];
     Serde::<Array<Call>>::serialize(@threshold_calls, ref threshold_payload);
     let denied = call_contract_syscall(
-        account_address,
-        starknet::selector!("__execute__"),
-        threshold_payload.span(),
+        account_address, starknet::selector!("__execute__"), threshold_payload.span(),
     );
 
     stop_cheat_signature(account_address);
     stop_cheat_caller_address(account_address);
 
     match denied {
-        core::result::Result::Ok(_) => {
-            assert(false, 'expected revert');
-        },
+        core::result::Result::Ok(_) => { assert(false, 'expected revert'); },
         core::result::Result::Err(panic_data) => {
             let data = panic_data.span();
             assert(data.len() > 0_usize, 'missing panic data');

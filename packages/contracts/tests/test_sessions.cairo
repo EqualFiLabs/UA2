@@ -88,9 +88,7 @@ fn add_session_allowlist(
     Serde::<Session>::serialize(@session, ref calldata);
 
     call_contract_syscall(
-        account_address,
-        starknet::selector!("add_session_with_allowlists"),
-        calldata.span(),
+        account_address, starknet::selector!("add_session_with_allowlists"), calldata.span(),
     )
         .unwrap_syscall();
 
@@ -109,9 +107,7 @@ fn build_transfer_call(mock_address: ContractAddress, to: ContractAddress, amoun
 }
 
 fn execute_session_call(
-    account_address: ContractAddress,
-    calls: @Array<Call>,
-    signature: @Array<felt252>,
+    account_address: ContractAddress, calls: @Array<Call>, signature: @Array<felt252>,
 ) -> SyscallResult<Span<felt252>> {
     let zero: ContractAddress = 0.try_into().unwrap();
     start_cheat_caller_address(account_address, zero);
@@ -121,9 +117,7 @@ fn execute_session_call(
     Serde::<Array<Call>>::serialize(calls, ref execute_calldata);
 
     let result = call_contract_syscall(
-        account_address,
-        starknet::selector!("__execute__"),
-        execute_calldata.span(),
+        account_address, starknet::selector!("__execute__"), execute_calldata.span(),
     );
 
     stop_cheat_signature(account_address);
@@ -248,11 +242,7 @@ fn test_session_expired_rejects() {
     let calls = array![call];
 
     let signature: Array<felt252> = build_session_signature(
-        account_address,
-        session_pubkey,
-        0_u128,
-        valid_until,
-        @calls,
+        account_address, session_pubkey, 0_u128, valid_until, @calls,
     );
 
     let result = execute_session_call(account_address, @calls, @signature);
@@ -291,11 +281,7 @@ fn test_session_selector_denied() {
     let calls = array![call];
 
     let signature: Array<felt252> = build_session_signature(
-        account_address,
-        session_pubkey,
-        0_u128,
-        valid_until,
-        @calls,
+        account_address, session_pubkey, 0_u128, valid_until, @calls,
     );
 
     let result = execute_session_call(account_address, @calls, @signature);
@@ -330,18 +316,12 @@ fn test_session_target_denied() {
 
     let mut calldata = array![];
     let call = Call {
-        to: account_address,
-        selector: starknet::selector!("get_owner"),
-        calldata: calldata.span(),
+        to: account_address, selector: starknet::selector!("get_owner"), calldata: calldata.span(),
     };
     let calls = array![call];
 
     let signature: Array<felt252> = build_session_signature(
-        account_address,
-        session_pubkey,
-        0_u128,
-        valid_until,
-        @calls,
+        account_address, session_pubkey, 0_u128, valid_until, @calls,
     );
 
     let result = execute_session_call(account_address, @calls, @signature);
@@ -380,11 +360,7 @@ fn test_session_value_cap() {
     let calls = array![call];
 
     let signature: Array<felt252> = build_session_signature(
-        account_address,
-        session_pubkey,
-        0_u128,
-        valid_until,
-        @calls,
+        account_address, session_pubkey, 0_u128, valid_until, @calls,
     );
 
     let result = execute_session_call(account_address, @calls, @signature);

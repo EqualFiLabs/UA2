@@ -16,4 +16,4 @@ We inherit from **OpenZeppelin’s AccountComponent (Cairo 2.x)**.
 
 ## Consequences
 - Pros: Security and audit coverage; ecosystem familiarity.  
-- Cons: Must track OZ Cairo upgrades; proxy pattern complexity.
+- Cons: Must track OZ Cairo upgrades; native upgrade flow still requires careful governance.

@@ -193,11 +193,7 @@ fn cross_session_signature_reuse_fails() {
     let calls = array![call];
 
     let signature_a: Array<felt252> = build_session_signature(
-        account_address,
-        session_pubkey_a,
-        0_u128,
-        policy.valid_until,
-        @calls,
+        account_address, session_pubkey_a, 0_u128, policy.valid_until, @calls,
     );
 
     let mut swapped_signature = ArrayTrait::<felt252>::new();

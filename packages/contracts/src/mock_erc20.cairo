@@ -21,10 +21,7 @@ pub mod MockERC20 {
 
     #[external(v0)]
     fn transferFrom(
-        ref self: ContractState,
-        from: ContractAddress,
-        to: ContractAddress,
-        amount: u256,
+        ref self: ContractState, from: ContractAddress, to: ContractAddress, amount: u256,
     ) -> bool {
         self.last_from.write(from);
         self.last_to.write(to);

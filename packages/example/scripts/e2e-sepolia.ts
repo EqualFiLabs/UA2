@@ -55,12 +55,12 @@ async function main(): Promise<void> {
   }
 
   const ua2AddressRaw = optionalEnv([
-    'UA2_SEPOLIA_PROXY_ADDR',
-    'UA2_PROXY_ADDR',
+    'UA2_SEPOLIA_ACCOUNT_ADDR',
+    'UA2_ACCOUNT_ADDR',
     'UA2_ADDR',
   ]);
   if (!ua2AddressRaw) {
-    throw new Error('UA2_PROXY_ADDR is required for Sepolia E2E runs.');
+    throw new Error('UA2_ACCOUNT_ADDR is required for Sepolia E2E runs.');
   }
 
   const ua2Address = normalizeHex(ua2AddressRaw);

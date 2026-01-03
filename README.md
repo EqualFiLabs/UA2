@@ -1,6 +1,6 @@
 # UA²-SDK — Universal Account Abstraction SDK for Starknet
 
-> **Hackathon Project • Resolve Starknet 2025**  
+> **Hackathon Project • Resolve Starknet 2025 WINNER**  
 > Build once, run anywhere: session keys • guardians • paymasters for Starknet AA.
 
 ---
